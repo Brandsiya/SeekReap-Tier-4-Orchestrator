@@ -1,4 +1,10 @@
 """
-Placeholder for Tier-4 module: '${module}.py'
+Policy Gate v2: Applies policies and validation rules
 """
-pass
+class PolicyGate:
+    def __init__(self):
+        pass
+
+    def validate(self, envelope) -> bool:
+        # TODO: implement real policy validation
+        return True

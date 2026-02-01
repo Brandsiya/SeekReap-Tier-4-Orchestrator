@@ -1,4 +1,10 @@
 """
-Placeholder for Tier-4 module: '${module}.py'
+Decision Router v2: Routes tasks to appropriate Tier-3 pipelines
 """
-pass
+class DecisionRouter:
+    def __init__(self):
+        pass
+
+    def route(self, envelope):
+        # TODO: implement routing logic
+        return envelope
