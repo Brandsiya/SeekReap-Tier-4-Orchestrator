@@ -1,4 +1,4 @@
-"""Core orchestration logic placeholder."""
-def main():
-    """Entry point for orchestrator."""
-    pass
+"""
+Placeholder for Tier-4 module: '${module}.py'
+"""
+pass

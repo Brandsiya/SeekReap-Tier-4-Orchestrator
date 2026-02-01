@@ -1,3 +1,3 @@
-# Tier-4 Architecture Overview
+# Tier-4 Orchestration Architecture
 
-This document describes the orchestration layer, its modules, and interaction with Tier-3.
+This document will describe Tier-4 structure, orchestration logic, and integration with Tier-3.
