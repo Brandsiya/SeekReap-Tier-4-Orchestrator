@@ -1,0 +1,5 @@
+[tool.poetry]
+name = "seekreap-tier4-orchestrator"
+version = "0.1.0"
+description = "Tier-4 orchestration layer for SeekReap"
+authors = ["Your Name <you@example.com>"]
