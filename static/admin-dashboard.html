@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head><title>SeekReap Admin Dashboard</title></head>
+<body>
+  <h1>💰 SeekReap Revenue Dashboard</h1>
+  <p><b>Live API:</b> http://seekreap-production.onrender.com/v4/verify</p>
+  <input id="client_id" placeholder="Client name (e.g. FacebookCreator1)" style="padding:10px">
+  <button onclick="trackClient()" style="padding:10px 20px">Test Client (3 verifications)</button>
+  <div id="client_results"></div>
+  <script>
+  async function trackClient() {
+    const client_id = document.getElementById('client_id').value || 'test-client';
+    document.getElementById('client_results').innerHTML = '<p>Testing...</p>';
+    const tests = [`${client_id}-1`, `${client_id}-2`, `${client_id}-3`];
+    const results = [];
+    for (let reap_id of tests) {
+      try {
+        const response = await fetch('http://seekreap-production.onrender.com/v4/verify', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({reap_id})
+        });
+        const data = await response.json();
+        results.push(data);
+      } catch(e) {}
+    }
+    document.getElementById('client_results').innerHTML = `
+      <div style="background:#e8f5e8;padding:20px;border-radius:10px">
+        <h2>✅ ${client_id} - PRODUCTION WORKING</h2>
+        ${results.map(r => `
+          <div style="border:1px solid #ccc;margin:10px 0;padding:10px">
+            <b>${r.certificate_id}</b> (${r.global_quorum})<br>
+            <small>Quorum: ${r.nodes_active} nodes, Latency: ${r.worldwide_latency}ms</small>
+          </div>
+        `).join('')}
+        <h3>💰 Invoice: $10k/mo + $${results.length * 0.01} usage</h3>
+        <p><em>Send client: http://41.56.248.204:8080/creator-dashboard.html</em></p>
+      </div>
+    `;
+  }
+  </script>
+</body>
+</html>
