@@ -1,30 +1,36 @@
 <!DOCTYPE html>
 <html>
-<head><title>🔥 SeekReap - Stop Facebook Demonetization</title>
+<head><title>🔥 SeekReap - Facebook Human Verification</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-body { font-family: -apple-system,BlinkMacSystemFont,sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-input, button { padding: 15px; font-size: 18px; width: 100%; margin: 10px 0; border-radius: 8px; border: 1px solid #ddd; }
-button { background: #0066cc; color: white; border: none; font-weight: bold; cursor: pointer; }
-.result { background: #e8f5e8; padding: 20px; border-radius: 10px; margin-top: 20px; }
-h1 { color: #333; }
-.certificate { background: #f0f0f0; padding: 15px; border-radius: 5px; font-family: monospace; }
+body { font-family: -apple-system,BlinkMacSystemFont,sans-serif; max-width: 700px; margin: 50px auto; padding: 20px; }
+input, button { padding: 15px; font-size: 18px; width: 100%; margin: 10px 0; border-radius: 8px; border: 1px solid #ddd; box-sizing: border-box; }
+button { background: linear-gradient(45deg, #0066cc, #0080ff); color: white; border: none; font-weight: bold; cursor: pointer; }
+.result { background: linear-gradient(135deg, #e8f5e8, #d4f4d4); padding: 25px; border-radius: 12px; margin-top: 20px; border-left: 5px solid #28a745; }
+.certificate { background: #f8f9fa; padding: 20px; border-radius: 8px; font-family: 'SF Mono', Monaco, monospace; border: 1px solid #dee2e6; margin: 15px 0; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }
+.metric { background: white; padding: 12px; border-radius: 6px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+h1 { color: #1a1a1a; background: linear-gradient(45deg, #0066cc, #0080ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 </style>
 </head>
 <body>
-<h1>🔥 SeekReap Human Verification</h1>
-<p>Enter Facebook video/post ID → Get certificate → Revenue restored 24-48hrs</p>
+<h1>🔥 SeekReap Global Human Verification</h1>
+<p>Enter Facebook video/post ID → Get detailed human proof → Revenue restored 24-48hrs</p>
 
-<input id="reap_id" placeholder="your-facebook-video-123" />
-<button onclick="verify()">✅ VERIFY HUMAN</button>
+<input id="reap_id" placeholder="facebook-video-123456" />
+<button onclick="verify()">🔍 VERIFY HUMAN (15 Global Nodes)</button>
 <div id="result"></div>
 
 <script>
 async function verify() {
-  const reap_id = document.getElementById('reap_id').value;
-  if (!reap_id) return alert('Enter video ID');
+  const reap_id = document.getElementById('reap_id').value.trim();
+  if (!reap_id) return alert('Enter Facebook video/post ID');
   
-  document.getElementById('result').innerHTML = '<p>🔄 Verifying with 15 global nodes...</p>';
+  document.getElementById('result').innerHTML = `
+    <div class="result">
+      <p>🔄 Verifying with 15 global nodes... (3-5s)</p>
+    </div>
+  `;
   
   try {
     const response = await fetch('/v4/verify', {
@@ -33,17 +39,48 @@ async function verify() {
       body: JSON.stringify({reap_id})
     });
     const data = await response.json();
+    
     document.getElementById('result').innerHTML = `
       <div class="result">
-        <h2>✅ HUMAN VERIFIED (15/15 Global Quorum)</h2>
-        <div class="certificate">${data.certificate_id}</div>
-        <p><strong>Copy this certificate to Facebook appeal:</strong></p>
-        <textarea style="width:100%;height:80px;font-family:monospace">${data.certificate_id}</textarea>
-        <p><em>Submit → Revenue restored 24-48hrs</em></p>
+        <h2>✅ HUMAN VERIFIED</h2>
+        <p><strong>Global Quorum:</strong> ${data.global_quorum} (${data.nodes_active} nodes)</p>
+        
+        <div class="certificate">
+          <strong>${data.certificate_id}</strong>
+        </div>
+        
+        <div class="metrics">
+          <div class="metric">
+            <strong>${data.human_proof.playback_sessions}</strong><br>
+            Playbacks
+          </div>
+          <div class="metric">
+            <strong>${data.human_proof.total_watch_time}</strong><br>
+            Watch Time
+          </div>
+          <div class="metric">
+            <strong>${data.human_proof.viewport_engagement}</strong><br>
+            Viewport
+          </div>
+          <div class="metric">
+            <strong>${data.human_proof.mouse_entropy}</strong><br>
+            Mouse Entropy
+          </div>
+        </div>
+        
+        <p><strong>Facebook Appeal:</strong></p>
+        <textarea style="width:100%;height:100px;font-family:monospace;padding:12px;border-radius:6px;border:1px solid #ddd;font-size:14px">${data.certificate_id}
+
+DETAILED PROOF:
+${JSON.stringify(data.human_proof, null, 2)}</textarea>
+        
+        <p style="font-size:14px;color:#666;margin-top:20px">
+          <em>Submit certificate to Facebook → Full monetization restored 24-48hrs</em>
+        </p>
       </div>
     `;
   } catch(e) {
-    document.getElementById('result').innerHTML = '<p style="color:red">Error - try again</p>';
+    document.getElementById('result').innerHTML = '<div class="result" style="background:red;color:white"><p>❌ Verification failed - try again</p></div>';
   }
 }
 </script>
