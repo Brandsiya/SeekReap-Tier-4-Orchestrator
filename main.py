@@ -1,7 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse, FileResponse
 import uuid
 import time
 import os
@@ -11,17 +11,18 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Serve static files (html, dashboards)
-app.mount("/", StaticFiles(directory=".", html=True), name="static")
-
+# API ENDPOINT - WORKS WITH DASHBOARD
 @app.post("/v4/verify")
-async def verify_reap(data: dict):
-    reap_id = data.get("reap_id", str(uuid.uuid4()))
+async def verify_reap(request: Request):
+    body = await request.json()
+    reap_id = body.get("reap_id", str(uuid.uuid4()))
     cert_id = f"seekreap-cert-{reap_id}-{int(time.time())}"
+    
     return {
         "global_id": f"global-{reap_id}",
         "tier3_verified": True,
@@ -30,3 +31,10 @@ async def verify_reap(data: dict):
         "worldwide_latency": 127.3,
         "certificate_id": cert_id
     }
+
+# SERVE ALL HTML FILES + API
+app.mount("/", StaticFiles(directory=".", html=True), name="static")
+
+@app.get("/")
+async def root():
+    return FileResponse("index.html", media_type="text/html")
