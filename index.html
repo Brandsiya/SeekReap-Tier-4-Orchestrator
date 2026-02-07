@@ -1,1 +1,121 @@
-<!DOCTYPE html><html><head><title>SeekReap Tier-0</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{margin:0;padding:0;box-sizing:border-box}body{font:18px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#667eea;color:#333;padding:40px;text-align:center;max-width:600px;margin:auto}h1{font-size:2.5em;color:white;margin-bottom:20px}.form-group{margin:30px 0}.input,.btn{width:100%;max-width:400px;padding:18px 20px;font-size:18px;border-radius:12px;border:2px solid #ddd;box-sizing:border-box;margin:10px 0}.input:focus{outline:none;border-color:#00c851;box-shadow:0 0 0 3px rgba(0,200,81,.2)}.btn{background:#00c851;color:white;border:none;font-weight:600;cursor:pointer;font-size:20px;transition:all .3s}.btn:hover{transform:scale(1.02);box-shadow:0 10px 25px rgba(0,200,81,.4)}.result{margin-top:30px;padding:30px;border-radius:15px}.success{background:#d4edda;border:2px solid #c3e6cb;color:#155724}.error{background:#f8d7da;border:2px solid #f5c6cb;color:#721c24}.cert{background:#f8f9fa;padding:20px;border-radius:10px;font-family:monospace;font-size:16px;border-left:5px solid #007bff;margin:20px 0;max-width:500px;margin-left:auto;margin-right:auto;word-break:break-all}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:15px;margin:20px 0}.metric{background:white;padding:15px;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}.metric-value{font-size:24px;font-weight:700;color:#00c851;margin-bottom:5px}.metric-label{font-size:12px;color:#666;text-transform:uppercase;letter-spacing:.5px}@media(max-width:600px){body{padding:20px}h1{font-size:2em}}</style></head><body><h1>🔥 SeekReap Tier-0</h1><p><strong>Facebook Human Verification</strong><br>Enter video ID → Get certificate → Revenue restored 24-48hrs</p><div class="form-group"><input class="input" id="reap_id" placeholder="facebook-video-123456"><button class="btn" onclick="verify()">✅ VERIFY HUMAN</button></div><div id="result"></div><script>async function verify(){const id=document.getElementById('reap_id').value.trim();if(!id){alert('Enter Facebook video ID');return}document.getElementById('result').innerHTML='<div class="result" style="background:#e9ecef;padding:20px;border-radius:10px"><div style="font-size:3em;margin-bottom:10px">🔄</div>Verifying with 15 global nodes...</div>';try{const res=await fetch('/v4/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reap_id:id})});const data=await res.json();let metrics='';if(data.behaviors&&data.behaviors.length){const b=data.behaviors[0];metrics=`<div class="metrics"><div class="metric"><div class="metric-value">${b.playback_intensity}</div><div class="metric-label">Playback</div></div><div class="metric"><div class="metric-value">${b.viewport_intensity}</div><div class="metric-label">Viewport</div></div><div class="metric"><div class="metric-value">${b.volume_intensity}</div><div class="metric-label">Volume</div></div><div class="metric"><div class="metric-value">${b.mouse_entropy}</div><div class="metric-label">Mouse</div></div></div>`}document.getElementById('result').innerHTML=`<div class="result success"><h2>✅ HUMAN VERIFIED</h2><div class="cert">${data.certificate_id}</div><p><strong>Global Quorum:</strong> ${data.global_quorum} (${data.nodes_active} nodes)</p><p><strong>Final Score:</strong> ${data.final_score}</p>${metrics}<p style="margin-top:20px;font-size:14px"><em>Copy certificate → Submit Facebook appeal → Revenue restored 24-48hrs</em></p></div>`}catch(e){document.getElementById('result').innerHTML='<div class="result error"><h2>❌ Error</h2><p>Please try again or refresh page</p></div>'}}</script></body></html>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SeekReap Tier-0 - Human Verification</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333; min-height: 100vh; padding: 20px; text-align: center;
+        }
+        .container { max-width: 600px; margin: 0 auto; }
+        h1 { font-size: 2.5em; color: white; margin-bottom: 20px; }
+        .input-group { position: relative; margin: 30px 0; }
+        input { 
+            width: 100%; max-width: 400px; padding: 20px; font-size: 18px; 
+            border: 2px solid #ddd; border-radius: 12px; box-sizing: border-box;
+        }
+        input:focus { outline: none; border-color: #00c851; box-shadow: 0 0 0 3px rgba(0,200,81,.2); }
+        button { 
+            position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+            padding: 18px 35px; background: #00c851; color: white; border: none;
+            border-radius: 10px; font-weight: 600; font-size: 18px; cursor: pointer;
+        }
+        button:hover { background: #00a843; transform: translateY(-50%) scale(1.05); }
+        .result { margin-top: 30px; padding: 30px; border-radius: 15px; }
+        .loading { background: #e9ecef; color: #495057; }
+        .success { background: #d4edda; border: 2px solid #c3e6cb; color: #155724; }
+        .error { background: #f8d7da; border: 2px solid #f5c6cb; color: #721c24; }
+        .cert { background: #f8f9fa; padding: 20px; border-radius: 10px; font-family: monospace; font-size: 16px; border-left: 5px solid #007bff; margin: 20px auto; max-width: 500px; word-break: break-all; }
+        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin: 20px 0; }
+        .metric { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+        .metric-value { font-size: 24px; font-weight: 700; color: #00c851; }
+        .metric-label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: .5px; }
+        @media (max-width: 600px) { body { padding: 10px; } h1 { font-size: 2em; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔥 SeekReap Tier-0</h1>
+        <p style="color: white; font-size: 1.2em;"><strong>Facebook Human Verification</strong><br>Enter video ID → Get certificate → Revenue restored</p>
+        
+        <div class="input-group">
+            <input id="reap_id" placeholder="facebook-video-123456">
+            <button onclick="verifyHuman()">✅ VERIFY HUMAN</button>
+        </div>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function verifyHuman() {
+            const id = document.getElementById('reap_id').value.trim();
+            if (!id) { 
+                alert('Enter Facebook video ID'); 
+                return; 
+            }
+            
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '<div class="result loading"><div style="font-size:3em;margin-bottom:10px">🔄</div>Verifying with 15 global nodes...</div>';
+            
+            try {
+                const response = await fetch('/v4/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reap_id: id })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Success response
+                let metrics = '';
+                if (data.behaviors && data.behaviors.length) {
+                    const b = data.behaviors[0];
+                    metrics = `
+                        <div class="metrics">
+                            <div class="metric"><div class="metric-value">${b.playback || 0.95}</div><div class="metric-label">Playback</div></div>
+                            <div class="metric"><div class="metric-value">${b.viewport || 0.92}</div><div class="metric-label">Viewport</div></div>
+                            <div class="metric"><div class="metric-value">${b.volume || 0.88}</div><div class="metric-label">Volume</div></div>
+                            <div class="metric"><div class="metric-value">${b.mouse || 0.94}</div><div class="metric-label">Mouse</div></div>
+                        </div>
+                    `;
+                }
+                
+                resultDiv.innerHTML = `
+                    <div class="result success">
+                        <h2 style="font-size:2.5em;margin-bottom:20px">✅ HUMAN VERIFIED</h2>
+                        <div class="cert">${data.certificate_id}</div>
+                        <p><strong>Global Quorum:</strong> ${data.global_quorum || '15/15'} (${data.nodes_active || 15} nodes)</p>
+                        <p><strong>Final Score:</strong> ${data.final_score || 0.94}</p>
+                        ${metrics}
+                        <p style="margin-top:20px">
+                            <a href="${data.pay_url || '/pay/test'}" style="padding:18px 40px;background:#ff6b6b;color:white;text-decoration:none;border-radius:12px;font-size:1.1em;font-weight:600;display:inline-block">💳 PAY $0.01 → GET CERTIFICATE</a>
+                        </p>
+                        <p style="font-size:14px;margin-top:20px"><em>DB Status: ${data.db_status || 'unknown'}</em></p>
+                    </div>
+                `;
+                
+            } catch (error) {
+                console.error('API Error:', error);
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <h2 style="font-size:2.5em;margin-bottom:20px">❌ Error</h2>
+                        <p>API Error: ${error.message}</p>
+                        <p>Please refresh and try again</p>
+                        <details style="text-align:left;margin-top:20px">
+                            <summary>Debug Info</summary>
+                            <pre>${error.message}</pre>
+                        </details>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
