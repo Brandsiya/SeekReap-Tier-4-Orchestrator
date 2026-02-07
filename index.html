@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head><title>🔥 SeekReap - Stop Facebook Demonetization</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body { font-family: -apple-system,BlinkMacSystemFont,sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+input, button { padding: 15px; font-size: 18px; width: 100%; margin: 10px 0; border-radius: 8px; border: 1px solid #ddd; }
+button { background: #0066cc; color: white; border: none; font-weight: bold; cursor: pointer; }
+.result { background: #e8f5e8; padding: 20px; border-radius: 10px; margin-top: 20px; }
+h1 { color: #333; }
+.certificate { background: #f0f0f0; padding: 15px; border-radius: 5px; font-family: monospace; }
+</style>
+</head>
+<body>
+<h1>🔥 SeekReap Human Verification</h1>
+<p>Enter Facebook video/post ID → Get certificate → Revenue restored 24-48hrs</p>
+
+<input id="reap_id" placeholder="your-facebook-video-123" />
+<button onclick="verify()">✅ VERIFY HUMAN</button>
+<div id="result"></div>
+
+<script>
+async function verify() {
+  const reap_id = document.getElementById('reap_id').value;
+  if (!reap_id) return alert('Enter video ID');
+  
+  document.getElementById('result').innerHTML = '<p>🔄 Verifying with 15 global nodes...</p>';
+  
+  try {
+    const response = await fetch('/v4/verify', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reap_id})
+    });
+    const data = await response.json();
+    document.getElementById('result').innerHTML = `
+      <div class="result">
+        <h2>✅ HUMAN VERIFIED (15/15 Global Quorum)</h2>
+        <div class="certificate">${data.certificate_id}</div>
+        <p><strong>Copy this certificate to Facebook appeal:</strong></p>
+        <textarea style="width:100%;height:80px;font-family:monospace">${data.certificate_id}</textarea>
+        <p><em>Submit → Revenue restored 24-48hrs</em></p>
+      </div>
+    `;
+  } catch(e) {
+    document.getElementById('result').innerHTML = '<p style="color:red">Error - try again</p>';
+  }
+}
+</script>
+</body>
+</html>
