@@ -1,10 +1,15 @@
-"""
-Decision Router v2: Routes tasks to appropriate Tier-3 pipelines
-"""
-class DecisionRouter:
-    def __init__(self):
-        pass
+from .envelope_models import DecisionEnvelope
 
-    def route(self, envelope):
-        # TODO: implement routing logic
+class DecisionRouter:
+    def route(self, envelope: DecisionEnvelope) -> DecisionEnvelope:
+        routing_map = {
+            "demo_task": "demo_pipeline",
+            "analytics_task": "analytics_pipeline",
+            "report_task": "report_pipeline"
+        }
+        envelope.context["pipeline"] = routing_map.get(
+            envelope.task_type, "default_pipeline"
+        )
+        if envelope.context.get("priority") == "high":
+            envelope.context["pipeline"] += "_high_priority"
         return envelope

@@ -1,0 +1,5 @@
+2026-02-01 15:47:03.641899 | task_001 | demo_pipeline | failed | 14.145717s
+2026-02-01 15:47:03.645794 | task_003 | demo_pipeline | failed | 14.149932s
+2026-02-01 15:47:03.650620 | task_005 | demo_pipeline | failed | 14.15244s
+2026-02-01 15:47:03.655630 | task_004 | demo_pipeline_high_priority | failed | 14.160609s
+2026-02-01 15:47:03.659511 | task_002 | demo_pipeline_high_priority | failed | 14.168302s

@@ -1,8 +1,4 @@
-"""
-Decision Envelope v1: Standard structure for Tier-4 → Tier-3 orchestration
-"""
-
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 @dataclass
@@ -11,4 +7,4 @@ class DecisionEnvelope:
     task_type: str
     inputs: Dict[str, Any]
     context: Dict[str, Any]
-    policies_applied: List[str] = None
+    policies_applied: List[str] = field(default_factory=list)
