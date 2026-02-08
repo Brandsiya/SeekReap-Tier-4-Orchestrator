@@ -137,18 +137,16 @@
                 const vid = sessionStorage.getItem("pendingVideoId");
                 if (vid) {
                     document.getElementById("videoId").value = vid;
-                    document.querySelector(".input-section").scrollIntoView({behavior: "smooth"});
-                    setTimeout(() => verifyVideo(true), 1500);
-                }
-                window.history.replaceState({}, "", window.location.pathname);
-            }
-
-            document.getElementById("videoId")?.addEventListener("input", e => {
-                sessionStorage.setItem("pendingVideoId", e.target.value);
-            });
-        });
-
-        function toggleMobileNav() {
+    <!-- Header -->
+    <header>
+        <div class="header-top">
+            <div class="logo">
+                <img src="logo.svg" alt="SeekReap">
+            </div>
+            <div class="search-desktop">
+                <i class="fas fa-search"></i>
+                <input type="text" placeholder="Search for videos...">
+            </div>
             <nav class="main-nav">
                 <a href="index.html" class="active">Home</a>
                 <a href="about.html">About</a>
@@ -156,28 +154,14 @@
                 <a href="whyexists.html">Why It Exists</a>
                 <a href="#pricing">Pricing</a>
             </nav>
-        function subscribeNewsletter() {
-            alert('Thank you for subscribing!');
-        }
-
-        function setActiveLink(activeLink) {
-            document.querySelectorAll(".main-nav a, .nav-links a").forEach(link => {
-                link.classList.remove("active");
-            });
-            if (activeLink) {
-                activeLink.classList.add("active");
-            }
-        }
-
-        function setActivePage() {
-            const currentPage = window.location.pathname.split("/").pop() || "index.html";
-            document.querySelectorAll(".main-nav a, .nav-links a").forEach(link => {
-                if (link.getAttribute("href") === currentPage || 
-                    (currentPage === "index.html" && link.getAttribute("href") === "#home")) {
-                    link.classList.add("active");
-                }
-            });
-        }
+            <div class="header-actions">
+                <button class="icon-btn" onclick="toggleMobileNav()">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <a href="auth.html" class="cta-header">Sign Up</a>
+            </div>
+        </div>
+    </header>
 
         window.addEventListener("DOMContentLoaded", setActivePage);
     </script>
