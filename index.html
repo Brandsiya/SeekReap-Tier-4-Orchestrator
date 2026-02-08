@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>SeekReap - Facebook Verification Certificates | 98.7% Success</title>
     <meta name="description" content="Restore Facebook monetization instantly. $0.01-$99.99 tiered certificates. SHA-256 secured. 98.7% success rate.">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -16,7 +16,7 @@
             --light: #f9fafb;
         }
         *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:'Inter',sans-serif;line-height:1.6;color:var(--dark);background:var(--light);overflow-x:hidden}
+        body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-family:'Inter',sans-serif;line-height:1.6;color:var(--dark);background:var(--light);overflow-x:hidden}
         
         /* HEADER - FULLY RESPONSIVE */
         header{background:var(--primary);color:white;padding:1rem 0;position:sticky;top:0;z-index:100}
@@ -96,26 +96,143 @@
         .cta-footer:hover{transform:scale(1.05)}
         .copyright{font-size:0.9rem;opacity:0.8;margin-top:2rem}
 
-        /* RESPONSIVE */
-        @media (max-width:1024px){
-            .header-top{padding:0 15px}
-            .main-nav{gap:0.5rem;padding:0.75rem 15px}
-            .main-nav a{padding:0.5rem 1rem;font-size:0.9rem}
-        }
-        @media (max-width:768px){
-            .header-top{flex-direction:column;gap:1rem;padding:1rem}
-            .search-desktop{display:none}
-            .main-nav{display:none}
-            .input-group{padding:1rem;flex-direction:column;gap:1rem}
-            .input-group input{width:100%}
-            .tier-select{position:static;min-width:100%;transform:none}
-            .input-group button{width:100%;margin-top:0.5rem}
-            section{padding:3rem 15px}
-        }
-        @media (max-width:480px){
-            .hero{padding:3rem 15px}
-            .stats{grid-template-columns:repeat(2,1fr);gap:1.5rem}
-        }
+
+/* ENHANCED RESPONSIVE DESIGN - COMPREHENSIVE */
+
+/* Large Desktop (1440px+) - Optimal spacing */
+@media (min-width: 1440px) {
+    .hero-content, .price-grid, section {
+        max-width: 1400px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+}
+
+/* Desktop (1024px - 1439px) - Standard view */
+@media (max-width: 1439px) {
+    .hero h1 { font-size: 3.5rem; }
+    .price-grid { gap: 1.5rem; }
+}
+
+/* Tablet Landscape (900px - 1023px) - Transitional */
+@media (max-width: 1023px) {
+    .header-top { padding: 0 15px; }
+    .main-nav { gap: 0.5rem; padding: 0.75rem 15px; }
+    .main-nav a { padding: 0.5rem 1rem; font-size: 0.9rem; }
+    .hero { padding: 3rem 20px; }
+    .hero h1 { font-size: 3rem; }
+    section { padding: 4rem 20px; }
+    .price-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Tablet Portrait (768px - 899px) - Stack most elements */
+@media (max-width: 899px) {
+    .header-top {
+        flex-direction: row !important;
+        justify-content: space-between;
+        padding: 1rem 15px;
+        gap: 0.5rem;
+    }
+    .logo img { height: 36px; }
+    .header-actions { flex-direction: row; gap: 0.5rem; }
+    .search-desktop { display: none !important; }
+    .main-nav { display: none !important; }
+    .hero { padding: 2.5rem 15px; }
+    .hero h1 { font-size: 2.5rem; line-height: 1.2; }
+    .hero-subtitle { font-size: 1.1rem; margin-bottom: 2rem; }
+    .input-group { flex-direction: column !important; padding: 1rem; gap: 1rem; }
+    .input-group input { width: 100% !important; font-size: 1rem; padding: 1rem; }
+    .tier-select { width: 100% !important; min-width: auto !important; position: static !important; transform: none !important; font-size: 1rem; }
+    .input-group button { width: 100% !important; padding: 1rem 1.5rem !important; font-size: 1rem; }
+    .stats { grid-template-columns: repeat(2, 1fr); gap: 1.5rem; margin-top: 2rem; }
+    .stat-number { font-size: 2.5rem; }
+    section { padding: 3rem 15px; }
+    .price-grid { grid-template-columns: 1fr !important; max-width: 500px; margin: 0 auto; }
+    .price-card { padding: 2rem; }
+    .price-amount { font-size: 3rem; }
+}
+
+/* Mobile Landscape (640px - 767px) - Compact but readable */
+@media (max-width: 767px) {
+    .hero { padding: 2rem 15px; }
+    .hero h1 { font-size: 2rem; }
+    .hero-subtitle { font-size: 1rem; }
+    .cta-header { padding: 0.6rem 1rem; font-size: 0.85rem; }
+    section { padding: 2.5rem 15px; }
+    h2 { font-size: 1.8rem; margin-bottom: 2rem; }
+    .price-card { padding: 1.5rem; }
+    .price-amount { font-size: 2.5rem; }
+    .price-features li { font-size: 0.95rem; }
+}
+
+/* Mobile Portrait (480px - 639px) - Primary mobile target */
+@media (max-width: 639px) {
+    .header-top { padding: 0.75rem 10px; }
+    .logo img { height: 32px; }
+    .header-actions { gap: 0.25rem; }
+    .icon-btn { padding: 0.5rem; font-size: 1rem; }
+    .cta-header { padding: 0.5rem 0.75rem; font-size: 0.8rem; border-radius: 25px; }
+    .hero { padding: 2rem 10px; }
+    .hero h1 { font-size: 1.75rem; }
+    .hero-subtitle { font-size: 0.95rem; }
+    .input-section { gap: 1rem; }
+    .input-group { padding: 0.75rem; border-radius: 15px; }
+    .input-group input { padding: 0.875rem; font-size: 0.95rem; }
+    .tier-select { padding: 0.875rem; font-size: 0.95rem; }
+    .input-group button { padding: 0.875rem 1.25rem !important; font-size: 0.95rem; }
+    .stats { grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+    .stat-number { font-size: 2rem; }
+    .stat div:last-child { font-size: 0.85rem; }
+    section { padding: 2rem 10px; }
+    h2 { font-size: 1.5rem; }
+    .price-card { padding: 1.25rem; border-radius: 15px; }
+    .popular { top: -12px; padding: 0.4rem 1.5rem; font-size: 0.8rem; }
+    .price-amount { font-size: 2.25rem; }
+    .price-validity { font-size: 0.95rem; }
+    .price-features li { font-size: 0.9rem; padding: 0.75rem 0; }
+    .price-cta { padding: 1rem; font-size: 1rem; }
+    footer { padding: 2rem 10px 1rem; }
+    .cta-footer { padding: 1rem 2rem; font-size: 0.95rem; }
+}
+
+/* Small Mobile (375px - 479px) - iPhone SE, older phones */
+@media (max-width: 479px) {
+    .hero h1 { font-size: 1.5rem; }
+    .hero-subtitle { font-size: 0.9rem; }
+    .input-group input, .tier-select, .input-group button { font-size: 0.9rem; padding: 0.75rem !important; }
+    .stats { gap: 0.75rem; }
+    .stat-number { font-size: 1.75rem; }
+    h2 { font-size: 1.35rem; }
+    .price-amount { font-size: 2rem; }
+}
+
+/* Extra Small Mobile (320px - 374px) - Minimum support */
+@media (max-width: 374px) {
+    .header-top { padding: 0.5rem 8px; }
+    .logo img { height: 28px; }
+    .hero { padding: 1.5rem 8px; }
+    .hero h1 { font-size: 1.35rem; }
+    .hero-subtitle { font-size: 0.85rem; }
+    .input-group { padding: 0.5rem; }
+    .input-group input, .tier-select, .input-group button { font-size: 0.85rem; padding: 0.65rem !important; }
+    section { padding: 1.5rem 8px; }
+    h2 { font-size: 1.2rem; }
+    .price-card { padding: 1rem; }
+    .price-amount { font-size: 1.75rem; }
+    .stat-number { font-size: 1.5rem; }
+    .stat div:last-child { font-size: 0.75rem; }
+}
+
+/* Touch device improvements */
+@media (hover: none) and (pointer: coarse) {
+    .icon-btn { min-width: 44px; min-height: 44px; }
+    .input-group button { min-height: 48px; }
+    .price-cta { min-height: 52px; }
+    .cta-header { min-height: 44px; }
+    .price-card:hover { transform: none; }
+    .nav-links a:hover { padding-left: 1rem; }
+}
+
     </style>
 </head>
 <body>
