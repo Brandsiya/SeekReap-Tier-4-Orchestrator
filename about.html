@@ -3,99 +3,77 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>About SeekReap - Restore Facebook Revenue</title>
+    <title>About - SeekReap Facebook Verification</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body{font-family:'Inter',sans-serif;line-height:1.7;color:#374151;background:#f9fafb;padding:0}
-        .hero{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:6rem 0 4rem;text-align:center}
-        .container{max-width:1200px;margin:0 auto;padding:0 20px}
-        h1{font-size:clamp(2.5rem,5vw,4rem);font-weight:700;margin-bottom:1rem}
-        .hero-subtitle{font-size:1.25rem;opacity:0.95;max-width:700px;margin:0 auto 3rem}
-        section{padding:6rem 0}
-        .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:3rem;margin:4rem 0}
-        .stat{text-align:center}
-        .stat-number{font-size:4rem;font-weight:700;background:linear-gradient(135deg,#00c851,#00a843);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-        .features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:2rem}
-        .feature-card{padding:2.5rem;background:white;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,0.1);border-left:5px solid #667eea}
-        .feature-icon{font-size:4rem;color:#00c851;margin-bottom:1.5rem}
-        .team{background:linear-gradient(135deg,#f8fafc 0%,#e2e8f0 100%);}
-        .team-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:2rem}
-        .team-card{text-align:center;padding:2rem;background:white;border-radius:20px;box-shadow:0 10px 40px rgba(0,0,0,0.1)}
-        .team-avatar{width:100px;height:100px;background:linear-gradient(135deg,#667eea,#764ba2);border-radius:50%;margin:0 auto 1rem;display:flex;align-items:center;justify-content:center;font-size:2rem}
-        .btn{display:inline-block;background:#00c851;color:white;padding:1.25rem 2.5rem;border-radius:12px;text-decoration:none;font-weight:600;font-size:1.1rem;margin:2rem 0;transition:all 0.2s}
-        .btn:hover{background:#00a843;transform:translateY(-2px)}
-        @media (max-width:768px){section{padding:3rem 0}}
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: #f9fafb; color: #1f2937; }
+        header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1rem 0; }
+        .header-top { display: flex; justify-content: space-between; align-items: center; padding: 0 20px; }
+        .logo img { height: 40px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 4rem 20px; }
+        h1 { font-size: 3rem; margin-bottom: 2rem; color: #1f2937; }
+        h2 { font-size: 2rem; margin: 2rem 0 1rem; color: #667eea; }
+        p { line-height: 1.8; margin-bottom: 1rem; font-size: 1.1rem; }
+        .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; margin: 3rem 0; }
+        .feature-card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        .feature-card i { font-size: 2.5rem; color: #00c851; margin-bottom: 1rem; }
+        .cta { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 3rem; border-radius: 20px; text-align: center; margin-top: 4rem; }
+        .cta a { display: inline-block; background: #00c851; color: white; padding: 1rem 2rem; border-radius: 50px; text-decoration: none; font-weight: 600; margin-top: 1rem; }
+        footer { background: #1f2937; color: white; padding: 3rem 20px; text-align: center; }
     </style>
 </head>
 <body>
-    <section class="hero">
-        <div class="container">
-            <h1>About SeekReap</h1>
-            <p class="hero-subtitle">Built in Cape Town for Facebook creators worldwide. Solving demonetization with cryptographic proof.</p>
-            <a href="/#pricing" class="btn">Get Certificate →</a>
+    <header>
+        <div class="header-top">
+            <div class="logo">
+                <a href="index.html"><img src="logo.svg" alt="SeekReap"></a>
+            </div>
+            <a href="index.html" style="color: white; text-decoration: none;">← Back to Home</a>
         </div>
-    </section>
-
-    <section class="container">
-        <div class="stats">
-            <div class="stat">
-                <div class="stat-number">98.7%</div>
-                <div>Facebook Success Rate</div>
+    </header>
+    
+    <div class="container">
+        <h1>About SeekReap</h1>
+        <p>SeekReap is the leading platform for Facebook monetization verification, helping creators restore and maintain their revenue streams with 98.7% success rate.</p>
+        
+        <h2>Our Mission</h2>
+        <p>To empower digital creators by providing reliable, secure, and instant verification certificates that Facebook's automated systems recognize and trust.</p>
+        
+        <div class="features">
+            <div class="feature-card">
+                <i class="fas fa-shield-alt"></i>
+                <h3>SHA-256 Security</h3>
+                <p>Bank-level encryption ensures your certificates are tamper-proof and verifiable by Facebook's systems.</p>
             </div>
-            <div class="stat">
-                <div class="stat-number">50K+</div>
-                <div>Videos Certified</div>
+            <div class="feature-card">
+                <i class="fas fa-globe"></i>
+                <h3>Global Infrastructure</h3>
+                <p>15-node consensus network spanning 12 countries ensures 99.9% uptime and instant processing.</p>
             </div>
-            <div class="stat">
-                <div class="stat-number">15</div>
-                <div>Global Nodes</div>
-            </div>
-            <div class="stat">
-                <div class="stat-number">&lt;8s</div>
-                <div>Verification Time</div>
-            </div>
-        </div>
-    </section>
-
-    <section>
-        <div class="container">
-            <h2 style="text-align:center;font-size:2.5rem;margin-bottom:4rem">Why We Built SeekReap</h2>
-            <div class="features-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">🎮</div>
-                    <h3>Facebook Gaming Crisis</h3>
-                    <p>Creators lose $100s weekly to false demonetization flags. Manual appeals fail 90% of time. We built cryptographic proof that works.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🔐</div>
-                    <h3>SHA-256 Immutability</h3>
-                    <p>Meta bots trust math, not promises. Our certificates use distributed node consensus + hash-chain verification = 98.7% approval.</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🇿🇦</div>
-                    <h3>Cape Town Built</h3>
-                    <p>Low costs + global talent = unbeatable pricing. $0.01 certificates that scale to $99.99 agency packs.</p>
-                </div>
+            <div class="feature-card">
+                <i class="fas fa-chart-line"></i>
+                <h3>Proven Success</h3>
+                <p>50,000+ videos certified with 98.7% Facebook approval rate. We track every submission.</p>
             </div>
         </div>
-    </section>
-
-    <section class="team">
-        <div class="container">
-            <h2 style="text-align:center;font-size:2.5rem;margin-bottom:4rem">Meet the Team</h2>
-            <div class="team-grid">
-                <div class="team-card">
-                    <div class="team-avatar">JD</div>
-                    <h3>Julian de Beer</h3>
-                    <p>Founder & CTO<br>Cape Town</p>
-                </div>
-            </div>
+        
+        <div class="cta">
+            <h2>Ready to Restore Your Monetization?</h2>
+            <p>Start with our $0.01 test or choose a plan that fits your needs.</p>
+            <a href="index.html#pricing">View Plans →</a>
         </div>
-    </section>
-
-    <section class="container" style="text-align:center;padding:4rem 0">
-        <h2 style="font-size:2.5rem;margin-bottom:2rem">Ready to Restore Revenue?</h2>
-        <a href="/#pricing" class="btn">Choose Your Plan →</a>
-    </section>
+    </div>
+    
+    <footer>
+        <p>&copy; 2026 SeekReap. All rights reserved.</p>
+        <p style="margin-top: 1rem; opacity: 0.8;">
+            <a href="index.html" style="color: #00c851; margin: 0 1rem;">Home</a> |
+            <a href="about.html" style="color: #00c851; margin: 0 1rem;">About</a> |
+            <a href="whofor.html" style="color: #00c851; margin: 0 1rem;">Who It's For</a> |
+            <a href="whyexists.html" style="color: #00c851; margin: 0 1rem;">Why It Exists</a>
+        </p>
+    </footer>
 </body>
 </html>

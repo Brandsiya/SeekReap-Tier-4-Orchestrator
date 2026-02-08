@@ -23,406 +23,54 @@
         .header-top{display:flex;justify-content:space-between;align-items:center;padding:0 20px;flex-wrap:wrap;gap:1rem}
         .logo img{height:40px;width:auto}
         .header-actions{display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap}
-        .search-desktop{display:flex;align-items:center;background:rgba(255,255,255,0.2);border-radius:25px;padding:0.5rem;gap:0.5rem;flex:1;max-width:300px}
-        .search-desktop input{background:none;border:none;color:white;outline:none;flex:1;font-size:1rem;padding:0.5rem}
+        .search-desktop{display:flex;align-items:center;background:rgba(255,255,255,0.2);border-radius:25px;padding:0.5rem;gap:0.5rem;flex:1;max-width:none;width:100%}
+        .search-desktop input{background:none;border:none;color:white;outline:none;flex:1;font-size:1rem;padding:0.5rem;width:100%}
         .search-desktop input::placeholder{color:rgba(255,255,255,0.7)}
-        .icon-btn{background:none;border:none;color:white;font-size:1.2rem;cursor:pointer;padding:0.75rem;transition:all 0.2s;border-radius:50%}
-        .icon-btn:hover{transform:scale(1.1);background:rgba(255,255,255,0.1)}
-        .cta-header{background:var(--success);padding:0.75rem 1.5rem;border-radius:50px;font-weight:600;text-decoration:none;color:white;transition:all 0.2s;font-size:0.95rem}
-        .cta-header:hover{transform:scale(1.05)}
-
-        /* MOBILE NAV - FIXED */
-        .mobile-nav{background:var(--primary);position:fixed;top:0;right:-100%;width:85%;max-width:400px;height:100vh;transition:all 0.3s ease;z-index:1000;padding:2rem;overflow-y:auto}
-        .mobile-nav.open{right:0}
-        .mobile-nav-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem}
-        .close-btn{font-size:2rem;cursor:pointer;background:none;border:none;color:white}
-        .nav-links{list-style:none}
-        .nav-links li{margin-bottom:1rem}
-        .nav-links a{color:white;text-decoration:none;font-size:1.1rem;font-weight:500;display:flex;align-items:center;gap:0.75rem;padding:1rem;border-radius:12px;transition:all 0.2s}
-        .nav-links a:hover{background:rgba(255,255,255,0.1);padding-left:1.5rem}
-        .nav-links a.active{color:var(--success);background:rgba(0,200,81,0.2)}
-        .search-mobile{display:flex;gap:0.5rem;margin:2rem 0;background:rgba(255,255,255,0.1);padding:1rem;border-radius:12px}
-        .mobile-auth{display:flex;flex-direction:column;gap:1rem;margin-top:2rem}
-        .mobile-auth a{padding:1rem;background:var(--success);color:white;text-decoration:none;border-radius:12px;font-weight:600;text-align:center}
-
-        /* MAIN NAV - FIXED */
-        .main-nav{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;padding:1rem 20px;background:rgba(255,255,255,0.1);backdrop-filter:blur(10px)}
-        .main-nav a{color:rgba(255,255,255,0.9);text-decoration:none;font-weight:500;padding:0.75rem 1.25rem;border-radius:8px;transition:all 0.2s;font-size:0.95rem;position:relative}
-        .main-nav a:hover{background:rgba(255,255,255,0.2);transform:translateY(-1px)}
-        .main-nav a.active{color:var(--success);background:rgba(0,200,81,0.3)}
-
-        /* HERO - FULLY RESPONSIVE */
-        .hero{padding:4rem 20px;background:var(--primary);color:white;text-align:center;position:relative;overflow:hidden}
-        .hero-content{max-width:800px;margin:0 auto}
-        .hero h1{font-size:clamp(2.5rem,6vw,4.5rem);font-weight:700;margin-bottom:1rem;line-height:1.2}
-        .hero-subtitle{font-size:clamp(1.1rem,3vw,1.3rem);opacity:0.95;margin-bottom:2.5rem}
-        .input-section{display:flex;flex-direction:column;align-items:center;gap:1.5rem;max-width:700px;margin:0 auto 3rem}
-        .input-group{position:relative;width:100%;background:rgba(255,255,255,0.15);border-radius:20px;padding:1.25rem;backdrop-filter:blur(15px);display:flex;align-items:center;gap:0.75rem}
-        .input-group input{flex:1;padding:1.25rem 1rem;font-size:1.1rem;border:none;border-radius:12px;background:white;outline:none;box-shadow:0 4px 12px rgba(0,0,0,0.1)}
-        .tier-select{padding:1rem;border:none;border-radius:12px;font-size:1rem;background:white;min-width:120px}
-        .input-group button{padding:1.25rem 2rem;background:var(--success);color:white;border:none;border-radius:12px;font-weight:600;cursor:pointer;font-size:1rem;transition:all 0.2s;white-space:nowrap}
-        .input-group button:hover{background:#00a843;transform:scale(1.02)}
-        .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:2rem;margin-top:3rem}
-        .stat{text-align:center}
-        .stat-number{font-size:clamp(2rem,4vw,3.5rem);font-weight:700;color:var(--success)}
-
-        /* SECTIONS */
-        section{padding:6rem 20px}
-        .pricing{background:linear-gradient(135deg,#f8fafc 0%,#e2e8f0 100%)}
-        h2{text-align:center;font-size:clamp(2rem,4vw,2.8rem);margin-bottom:3rem;color:var(--dark)}
-        .price-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:2rem;max-width:1200px;margin:0 auto}
-        .price-card{background:white;padding:3rem;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,0.1);position:relative;transition:all 0.3s;text-align:center}
-        .price-card:hover{transform:translateY(-12px)}
-        .price-card.recommended{box-shadow:0 30px 80px rgba(0,200,81,0.3)}
-        .popular{position:absolute;top:-15px;left:50%;transform:translateX(-50%);background:var(--success);color:white;padding:0.5rem 2rem;border-radius:25px;font-size:0.9rem;font-weight:600}
-        .price-amount{font-size:3.5rem;font-weight:700;color:var(--success);margin:1rem 0}
-        .price-validity{font-size:1.1rem;color:#666;margin-bottom:2rem;font-weight:500}
-        .price-features{list-style:none;margin-bottom:2.5rem}
-        .price-features li{padding:1rem 0;display:flex;align-items:center;justify-content:center;gap:0.75rem;font-size:1rem}
-        .price-cta{width:100%;padding:1.5rem;background:var(--success);color:white;border:none;border-radius:12px;font-size:1.1rem;font-weight:600;cursor:pointer;transition:all 0.2s}
-        .price-cta:hover{background:#00a843;transform:scale(1.02)}
-        
-        /* PAYPAL BUTTONS */
-        .paypal-btn, .price-cta[href*="paypal"] {
-            background: linear-gradient(135deg, #0070ba 0%, #003087 100%);
-            border: 2px solid #005ea6;
-            color: white;
-            font-weight: 600;
-            text-decoration: none;
-            display: inline-block;
-            padding: 1.25rem 2.5rem;
-            border-radius: 50px;
-            transition: all 0.3s ease;
-            box-shadow: 0 8px 25px rgba(0,112,186,0.3);
-            font-size: 1.1rem;
-            width: 100%;
-            text-align: center;
-            margin-top: 0.5rem;
-        }
-
-        .paypal-btn:hover, .price-cta[href*="paypal"]:hover {
-            background: linear-gradient(135deg, #005ea6 0%, #002666 100%);
-            transform: translateY(-2px) scale(1.02);
-            box-shadow: 0 15px 35px rgba(0,112,186,0.4);
-        }
-
-        /* FOOTER - WITH COPYRIGHT */
-        footer{background:var(--dark);color:white;padding:3rem 20px 1.5rem;text-align:center}
-        .cta-footer{background:var(--success);color:white;padding:1.25rem 2.5rem;border-radius:50px;font-weight:600;text-decoration:none;display:inline-block;margin-top:1rem;transition:all 0.2s}
-        .cta-footer:hover{transform:scale(1.05)}
-        .copyright{font-size:0.9rem;opacity:0.8;margin-top:2rem}
-
-        /* RESPONSIVE */
-        @media (max-width: 768px) {
-            .price-grid {
-                grid-template-columns: 1fr;
-                gap: 2rem;
-                max-width: 400px;
-            }
-            
-            .price-card {
-                padding: 2rem;
-            }
-            
-            .price-amount {
-                font-size: 2.5rem;
-            }
-        }
+        .search-desktop i{color:rgba(255,255,255,0.9);font-size:1rem}
         
         @media (max-width:1024px){
             .header-top{padding:0 15px}
-            .main-nav{gap:0.5rem;padding:0.75rem 15px}
-            .main-nav a{padding:0.5rem 1rem;font-size:0.9rem}
-        }
-        @media (max-width:768px){
-            .header-top{flex-direction:column;gap:1rem;padding:1rem}
-            .search-desktop{display:none}
-            .main-nav{display:none}
-            .input-group{padding:1rem;flex-direction:column;gap:1rem}
-            .input-group input{width:100%}
-            .tier-select{position:static;min-width:100%;transform:none}
-            .input-group button{width:100%;margin-top:0.5rem}
-            section{padding:3rem 15px}
-        }
-        @media (max-width:480px){
-            .hero{padding:3rem 15px}
-            .stats{grid-template-columns:repeat(2,1fr);gap:1.5rem}
-        }
-    </style>
-</head>
-<body>
-    <!-- MOBILE NAV OVERLAY -->
-    <nav class="mobile-nav" id="mobileNav">
-        <div class="mobile-nav-header">
-            <img src="logo.svg" alt="SeekReap" style="height:32px">
-            <button class="close-btn" onclick="toggleMobileNav()">✕</button>
-        </div>
-        <div class="search-mobile">
-            <input type="text" placeholder="Search certificates..." id="mobileSearch">
-            <button onclick="performSearch()"><i class="fas fa-search"></i></button>
-        </div>
-        <ul class="nav-links">
-            <li><a href="#home" onclick="setActiveLink(this);toggleMobileNav()"><i class="fas fa-home"></i> Home</a></li>
-            <li><a href="#about" onclick="setActiveLink(this);toggleMobileNav()"><i class="fas fa-info-circle"></i> About</a></li>
-            <li><a href="howitworks.html" onclick="setActiveLink(this);toggleMobileNav()"><i class="fas fa-play-circle"></i> How it Works</a></li>
-            <li><a href="#whofor" onclick="setActiveLink(this);toggleMobileNav()"><i class="fas fa-users"></i> Who It's For</a></li>
-            <li><a href="#whyexists" onclick="setActiveLink(this);toggleMobileNav()"><i class="fas fa-question-circle"></i> Why It Exists</a></li>
-            <li><a href="#" onclick="inviteCreator();toggleMobileNav()" class="share-btn"><i class="fas fa-user-plus"></i> Invite Creator</a></li>
-        </ul>
-        <div class="mobile-auth">
-            <a href="auth.html"><i class="fas fa-sign-in-alt"></i> Sign Up / Sign In</a>
-            <a href="terms.html" class="terms-link">Terms of Service</a>
-            <a href="privacy.html" class="privacy-link">Privacy Policy</a>
-            <a href="contact.html">Contact</a>
-        </div>
-    </nav>
+        .main-nav{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;padding:1.5rem 20px;background:rgba(255,255,255,0.1);backdrop-filter:blur(10px);margin-top:0.5rem}
+        .main-nav a{color:rgba(255,255,255,0.9);text-decoration:none;font-weight:500;padding:0.75rem 1.5rem;border-radius:8px;transition:all 0.2s;font-size:0.95rem;position:relative}
+        .main-nav a:hover{background:rgba(255,255,255,0.2);transform:translateY(-2px)}
+        .main-nav a.active{color:var(--success);background:rgba(0,200,81,0.3);font-weight:700 !important}
 
-    <!-- HEADER -->
-    <header>
-        <div class="header-top">
-            <div class="logo">
-                <img src="logo.svg" alt="SeekReap">
-            </div>
-            <div class="header-actions">
-                <div class="search-desktop">
-                    <input type="text" placeholder="Search certificates...">
-                    <i class="fas fa-search"></i>
-                </div>
-                <button class="icon-btn" onclick="toggleMobileNav()" id="hamburger">
-                    <i class="fas fa-bars"></i>
-                </button>
-                <button class="icon-btn share-btn" onclick="sharePage()" title="Share">
-                    <i class="fas fa-share-alt"></i>
-                </button>
-                <a href="#pricing" class="cta-header">Choose Plan →</a>
-            </div>
-        </div>
-        <nav class="main-nav">
-            <a href="#home" class="active">Home</a>
-            <a href="#about">About</a>
-            <a href="howitworks.html">How it Works</a>
-            <a href="#whofor">Who It's For</a>
-            <a href="#whyexists">Why It Exists</a>
-        </nav>
-    </header>
-
-    <!-- HERO -->
-    <section class="hero" id="home">
-        <div class="hero-content">
-            <h1>Facebook Verification Certificates</h1>
-            <p class="hero-subtitle">Restore monetization instantly. SHA-256 secured. 98.7% Facebook approval. Choose from $0.01 test to $99.99 agency packs.</p>
-            <div class="input-section">
-                <div class="input-group">
-                    <input type="text" id="videoId" placeholder="Enter Facebook Video ID (e.g. facebook-video-123456)">
-                    <select id="tierSelect" class="tier-select">
-                        <option value="test">$0.01 Test (24h)</option>
-                        <option value="custom" selected>$0.99 Custom (30 days)</option>
-                        <option value="bronze">$9.99 Bronze (20 videos)</option>
-                    </select>
-                    <button onclick="verifyVideo()">🔍 VERIFY HUMAN</button>
-                </div>
-                <a href="#pricing" class="cta-header">Or Choose Full Plan →</a>
-            </div>
-            <div class="stats">
-                <div class="stat"><div class="stat-number">98.7%</div><div>Success Rate</div></div>
-                <div class="stat"><div class="stat-number">15/15</div><div>Global Nodes</div></div>
-                <div class="stat"><div class="stat-number">&lt;8s</div><div>Processing</div></div>
-                <div class="stat"><div class="stat-number">50K+</div><div>Videos Certified</div></div>
-            </div>
-        </div>
-    </section>
-
-    <!-- PRICING -->
-    <section class="pricing" id="pricing">
-        <h2>Choose Your Verification Plan</h2>
-        <div class="price-grid">
-            <div class="price-card">
-                <div class="price-header">Test Drive</div>
-                <div class="price-amount">$0.01</div>
-                <div class="price-validity">1 Video • 24 Hours</div>
-                <ul class="price-features">
-                    <li><i class="fas fa-check"></i> Landing page demo</li>
-                    <li><i class="fas fa-check"></i> SHA-256 certificate</li>
-                    <li><i class="fas fa-check"></i> 15-node consensus</li>
-                </ul>
-                <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=brandsiya@hotmail.com&amount=0.01&currency_code=USD&item_name=SeekReap+Test&return=https://brandsiya.github.io/SeekReap-Tier-4-Orchestrator/?pay_success=true&rm=2" target="_blank" class="price-cta paypal-btn">💳 PayPal $0.01</a>
-            </div>
-            <div class="price-card recommended">
-                <div class="popular">MOST POPULAR</div>
-                <div class="price-header">Custom</div>
-                <div class="price-amount">$0.99</div>
-                <div class="price-validity">1 Premium Video • 30 Days</div>
-                <ul class="price-features">
-                    <li><i class="fas fa-check"></i> Premium JSON certificate</li>
-                    <li><i class="fas fa-check"></i> Priority processing</li>
-                    <li><i class="fas fa-check"></i> Direct download</li>
-                </ul>
-                <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=brandsiya@hotmail.com&amount=0.99&currency_code=USD&item_name=SeekReap+Custom&return=https://brandsiya.github.io/SeekReap-Tier-4-Orchestrator/?pay_success=true&rm=2" target="_blank" class="price-cta paypal-btn">💳 PayPal $0.99</a>
-            </div>
-            <div class="price-card">
-                <div class="price-header">Bronze Pack</div>
-                <div class="price-amount">$9.99</div>
-                <div class="price-validity">20 Videos • 30 Days</div>
-                <ul class="price-features">
-                    <li><i class="fas fa-check"></i> Creator dashboard</li>
-                    <li><i class="fas fa-check"></i> Standard support</li>
-                    <li><i class="fas fa-check"></i> Bulk processing</li>
-                </ul>
-                <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=brandsiya@hotmail.com&amount=9.99&currency_code=USD&item_name=SeekReap+Bronze&return=https://brandsiya.github.io/SeekReap-Tier-4-Orchestrator/?pay_success=true&rm=2" target="_blank" class="price-cta paypal-btn">💳 PayPal $9.99</a>
-            </div>
-        </div>
-    </section>
-
-    <!-- NEWSLETTER -->
-    <section class="newsletter" style="background:#f8fafc;padding:4rem 20px;text-align:center">
-        <div style="max-width:600px;margin:auto">
-            <h2 style="font-size:2rem;margin-bottom:1rem">🔔 Get Updates</h2>
-            <p>Get certificate launch notifications</p>
-            <form style="display:flex;gap:1rem;max-width:400px;margin:2rem auto">
-                <input type="email" placeholder="your@email.com" style="flex:1;padding:1rem;border:1px solid #ddd;border-radius:8px">
-                <button type="submit" style="padding:1rem 2rem;background:#00c851;color:white;border:none;border-radius:8px;cursor:pointer">Subscribe</button>
-            </form>
-        </div>
-    </section>
-
-    <!-- FOOTER -->
-    <footer>
-        <div style="max-width:800px;margin:0 auto">
-            <h3>🔥 SeekReap • Cape Town, South Africa</h3>
-            <p>50K+ videos certified | 98.7% Facebook success | support@seekreap.com</p>
-            <a href="contact.html" class="cta-footer">Get Support →</a>
-            <p class="copyright">&copy; 2026 SeekReap. All rights reserved. <span style="font-size:0.8rem">®</span></p>
-        </div>
-    </footer>
-
-    <script>
-        // Navigation
-        function toggleMobileNav() {
-            document.getElementById('mobileNav').classList.toggle('open');
-        }
-
-        function setActiveLink(activeLink) {
-            document.querySelectorAll('.main-nav a, .nav-links a').forEach(link => {
-                link.classList.remove('active');
-            });
-            activeLink.classList.add('active');
-        }
-
-        // Share functionality
-        function sharePage() {
-            if (navigator.share) {
-                navigator.share({
-                    title: 'SeekReap - Facebook Verification',
-                    text: 'Restore Facebook monetization instantly! 98.7% success rate.',
-                    url: window.location.href
-                });
-            } else {
-                navigator.clipboard.writeText(window.location.href);
-                alert('🔗 Link copied to clipboard!');
-            }
-        }
-
-        function inviteCreator() {
-            sharePage();
-        }
-
-        // Smooth scrolling + active nav
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-            anchor.addEventListener('click', function(e) {
-                e.preventDefault();
-                const target = document.querySelector(this.getAttribute('href'));
-                if (target) {
-                    target.scrollIntoView({behavior: 'smooth'});
-                    setActiveLink(this);
-                }
-            });
+    function setActiveLink(activeLink) {
+        // Remove active from all main nav links
+        document.querySelectorAll(".main-nav a, .nav-links a").forEach(link => {
+            link.classList.remove("active");
         });
-
-        // Set active on scroll
-        window.addEventListener('scroll', () => {
-            const sections = ['#home', '#about', '#whofor', '#whyexists', '#pricing'];
-            const scrollPos = window.scrollY + 100;
-            sections.forEach(section => {
-                const el = document.querySelector(section);
-                if (el && el.offsetTop <= scrollPos && (el.offsetTop + el.offsetHeight > scrollPos)) {
-                    document.querySelectorAll('.main-nav a').forEach(a => a.classList.remove('active'));
-                    document.querySelector(`.main-nav a[href="${section}"]`)?.classList.add('active');
-                }
-            });
-        });
-
-        // Video verification
-        async function verifyVideo(isPrepaid = false) {
-            const videoId = document.getElementById('videoId').value.trim();
-            const tier = document.getElementById('tierSelect').value;
-            if (!videoId) {
-                alert('Enter Facebook Video ID');
-                return;
+        if (activeLink) {
+            activeLink.classList.add("active");
+        }
+    }
+    
+    // Set active link based on current page
+    function setActivePage() {
+        const currentPage = window.location.pathname.split("/").pop() || "index.html";
+        document.querySelectorAll(".main-nav a, .nav-links a").forEach(link => {
+            if (link.getAttribute("href") === currentPage || 
+                (currentPage === "index.html" && link.getAttribute("href") === "#home")) {
+                link.classList.add("active");
             }
-
-            const overlay = document.createElement('div');
-            overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(10,25,47,.98);display:flex;justify-content:center;align-items:center;z-index:2000;flex-direction:column;color:white;font-family:Inter,sans-serif;text-align:center;padding:2rem';
-            overlay.innerHTML = `<div style="font-size:4rem;margin-bottom:2rem;">🔄</div><div style="font-size:1.5rem;margin-bottom:2rem;">VERIFYING ${tier.toUpperCase()} TIER...</div><div id="nodes" style="font-family:monospace;font-size:1rem;max-height:300px;overflow-y:auto;"></div>`;
-            document.body.appendChild(overlay);
-
-            const nodes = ['Cape Town','London','NYC','Toronto','Paris','Berlin','Dubai','Seoul','Amsterdam','Sydney','Tokyo','Singapore'];
-            let i = 0;
-            const intv = setInterval(() => {
-                if (i < nodes.length) {
-                    document.getElementById('nodes').innerHTML += `<div style="color:#00c851;margin:0.25rem 0;">✅ ${nodes[i]} [VERIFIED]</div>`;
-                    i++;
-                }
-            }, 500);
-
-            setTimeout(() => {
-                clearInterval(intv);
-                document.body.removeChild(overlay);
-                const certId = `SEEKREAP-${tier.toUpperCase()}-CERT-${videoId.substring(0,6).toUpperCase()}-${Date.now()}`;
-
-                if (isPrepaid) {
-                    showCertificate(certId, videoId, tier);
-                } else {
-                    alert(`✅ VERIFICATION COMPLETE!
-
-ID: ${certId}
-Choose your plan below 👇`);
-                    document.getElementById('pricing').scrollIntoView({behavior: 'smooth'});
-                }
-            }, 6500);
-        }
-
-        function showCertificate(id, vid, tier) {
-            const cert = {
-                "status": "VERIFIED",
-                "certificate_id": id,
-                "video_id": vid,
-                "tier": tier.toUpperCase(),
-                "timestamp": new Date().toISOString(),
-                "global_nodes": 15,
-                "consensus": "100%",
-                "facebook_approval": "98.7%",
-                "signature": "SHA256:abc123...",
-                "download_url": "https://seekreap-system.onrender.com/cert/" + id
-            };
-
-            const blob = new Blob([JSON.stringify(cert, null, 2)], {type: "application/json"});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `SeekReap_${tier}_${vid}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-            alert(`🎉 CERTIFICATE DOWNLOADED!
-
-File: SeekReap_${tier}_${vid}.json
-Ready for Facebook submission
-98.7% approval rate`);
-        }
-
-        window.addEventListener("DOMContentLoaded", () => {
+        });
+    }
+    
+    // Call on page load
+    window.addEventListener("DOMContentLoaded", setActivePage);
+        document.getElementById("testCounter").style.display = "block";
+        document.getElementById("testCounter").innerHTML = `🚫 Test limit reached. <a href="#pricing" style="color:#00c851;text-decoration:underline;">Choose a plan →</a>`;
+    }
+    // Initialize test counter
+    const testCount = localStorage.getItem("videoTestCounter") || 0;
+    const remaining = 3 - testCount;
+    if (remaining > 0) {
+        document.getElementById("testCounter").style.display = "block";
+        document.getElementById("testCounter").innerHTML = `Free tests remaining: <strong>${remaining}</strong>`;
+    } else if (testCount >= 3) {
+        document.getElementById("testCounter").style.display = "block";
+        document.getElementById("testCounter").innerHTML = `🚫 Test limit reached. <a href="#pricing" style="color:#00c851;text-decoration:underline;">Choose a plan →</a>`;
+    }
             const params = new URLSearchParams(window.location.search);
             if (params.get("pay_success") === "true") {
                 const vid = sessionStorage.getItem("pendingVideoId");
@@ -438,6 +86,52 @@ Ready for Facebook submission
                 sessionStorage.setItem("pendingVideoId", e.target.value);
             });
         });
+
+// Video testing counter
+let videoTestCounter = 0;
+const MAX_TEST_VIDEOS = 3;
+
+function checkVideoLimit() {
+    const counter = localStorage.getItem("videoTestCounter");
+    return counter ? parseInt(counter) >= MAX_TEST_VIDEOS : false;
+}
+
+function incrementVideoCounter() {
+    let counter = localStorage.getItem("videoTestCounter");
+    counter = counter ? parseInt(counter) + 1 : 1;
+    localStorage.setItem("videoTestCounter", counter);
+    return counter;
+}
+
+function resetVideoCounter() {
+    localStorage.removeItem("videoTestCounter");
+    videoTestCounter = 0;
+    document.getElementById("testCounter").innerHTML = `Free tests remaining: <strong>3</strong>`;
+    document.getElementById("testCounter").style.display = "block";
+}
+
+// Video testing counter
+let videoTestCounter = 0;
+const MAX_TEST_VIDEOS = 3;
+
+function checkVideoLimit() {
+    const counter = localStorage.getItem("videoTestCounter");
+    return counter ? parseInt(counter) >= MAX_TEST_VIDEOS : false;
+}
+
+function incrementVideoCounter() {
+    let counter = localStorage.getItem("videoTestCounter");
+    counter = counter ? parseInt(counter) + 1 : 1;
+    localStorage.setItem("videoTestCounter", counter);
+    return counter;
+}
+
+function resetVideoCounter() {
+    localStorage.removeItem("videoTestCounter");
+    videoTestCounter = 0;
+    document.getElementById("testCounter").innerHTML = `Free tests remaining: <strong>3</strong>`;
+    document.getElementById("testCounter").style.display = "block";
+}
 
         function performSearch() {
             const query = document.getElementById('mobileSearch').value;
