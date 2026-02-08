@@ -89,35 +89,6 @@
 
 // Video testing counter
 let videoTestCounter = 0;
-const MAX_TEST_VIDEOS = 3;
-
-function checkVideoLimit() {
-    const counter = localStorage.getItem("videoTestCounter");
-    return counter ? parseInt(counter) >= MAX_TEST_VIDEOS : false;
-}
-
-function incrementVideoCounter() {
-    let counter = localStorage.getItem("videoTestCounter");
-    counter = counter ? parseInt(counter) + 1 : 1;
-    localStorage.setItem("videoTestCounter", counter);
-    return counter;
-}
-
-function resetVideoCounter() {
-    localStorage.removeItem("videoTestCounter");
-    videoTestCounter = 0;
-    document.getElementById("testCounter").innerHTML = `Free tests remaining: <strong>3</strong>`;
-    document.getElementById("testCounter").style.display = "block";
-}
-
-// Video testing counter
-let videoTestCounter = 0;
-const MAX_TEST_VIDEOS = 3;
-
-function checkVideoLimit() {
-    const counter = localStorage.getItem("videoTestCounter");
-    return counter ? parseInt(counter) >= MAX_TEST_VIDEOS : false;
-}
 
 function incrementVideoCounter() {
     let counter = localStorage.getItem("videoTestCounter");
