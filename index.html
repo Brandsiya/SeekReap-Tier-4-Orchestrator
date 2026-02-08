@@ -14,226 +14,7 @@
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; background: #f9fafb; color: #1f2937; }
-        header { background: var(--primary); padding: 1rem 0; position: sticky; top: 0; z-index: 100; }
-        .header-top { display: flex; justify-content: space-between; align-items: center; padding: 1rem 20px 0.5rem 20px; max-width: 1400px; margin: 0 auto; position: relative; z-index: 10; }
-    </style>
-</head>
-<body>
-    <!-- Header -->
-    <header>
-        <div class="header-top">
-            <div class="logo">
-                <img src="logo.svg" alt="SeekReap">
-            </div>
-            <div class="search-desktop">
-                <i class="fas fa-search"></i>
-                <input type="text" placeholder="Search for videos...">
-            </div>
-            <nav class="main-nav">
-                <a href="index.html" class="active">Home</a>
-                <a href="about.html">About</a>
-                <a href="whofor.html">Who It's For</a>
-                <a href="whyexists.html">Why It Exists</a>
-                <a href="#pricing">Pricing</a>
-            </nav>
-            <div class="header-actions">
-                <button class="icon-btn" onclick="toggleMobileNav()">
-                    <i class="fas fa-bars"></i>
-                </button>
-                <a href="auth.html" class="cta-header">Sign Up</a>
-            </div>
-        </div>
-    </header>
-
-    <!-- Mobile Navigation -->
-    <div class="mobile-nav" id="mobileNav">
-        <div class="mobile-nav-header">
-            <img src="logo.svg" alt="SeekReap">
-            <button class="close-btn" onclick="toggleMobileNav()">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        <div class="search-mobile">
-            <input type="text" id="mobileSearch" placeholder="Search...">
-            <button onclick="performSearch()">
-                <i class="fas fa-search"></i>
-            </button>
-        </div>
-        <ul class="nav-links">
-            <li><a href="index.html" onclick="toggleMobileNav()"><i class="fas fa-home"></i> Home</a></li>
-            <li><a href="about.html" onclick="toggleMobileNav()"><i class="fas fa-info-circle"></i> About</a></li>
-            <li><a href="whofor.html" onclick="toggleMobileNav()"><i class="fas fa-users"></i> Who It's For</a></li>
-            <li><a href="whyexists.html" onclick="toggleMobileNav()"><i class="fas fa-question-circle"></i> Why It Exists</a></li>
-            <li><a href="#pricing" onclick="toggleMobileNav()"><i class="fas fa-tags"></i> Pricing</a></li>
-        </ul>
-        <div class="mobile-auth">
-            <a href="auth.html" onclick="toggleMobileNav()">Sign Up</a>
-            <a href="auth.html" onclick="toggleMobileNav()">Sign In</a>
-        </div>
-    </div>
-
-    <!-- Hero Section -->
-    <section class="hero" id="home">
-        <div class="hero-content">
-            <h1>Verify Facebook Monetization Instantly</h1>
-            <p>Get SHA-256 certificates with 98.7% Facebook approval rate. Restore your revenue in seconds, not weeks.</p>
-            <div class="input-section">
-                <div class="input-group">
-                    <input type="text" id="videoId" placeholder="Enter Facebook Video ID (e.g., 123456789012345)">
-                    <div class="tier-select">
-                        <select id="tierSelect">
-                            <option value="test">Test ($0.01)</option>
-                            <option value="custom">Custom ($0.99)</option>
-                            <option value="bronze">Bronze ($9.99)</option>
-                        </select>
-                    </div>
-                    <button onclick="verifyVideo()">🔍 VERIFY HUMAN</button>
-                </div>
-                <div id="testCounter" style="color:white;font-size:0.9rem;margin-top:0.5rem;padding:0.5rem;background:rgba(255,255,255,0.1);border-radius:8px;display:none;">Free tests remaining: <strong>3</strong></div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Stats -->
-    <section>
-        <div class="stats">
-            <div class="stat-card">
-                <div class="stat-number">98.7%</div>
-                <div>Success Rate</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">&lt;8s</div>
-                <div>Processing Time</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">50K+</div>
-                <div>Videos Certified</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">15</div>
-                <div>Global Nodes</div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Pricing -->
-    <section id="pricing">
-        <h2>Choose Your Plan</h2>
-        <div class="price-grid">
-            <div class="price-card">
-                <div class="price-badge">Popular</div>
-                <h3>Test</h3>
-                <div class="price-amount">$0.01 <span>/ one-time</span></div>
-                <p>Try our verification system with one video</p>
-                <ul class="price-features">
-                    <li>1 Facebook video verification</li>
-                    <li>SHA-256 certificate</li>
-                    <li>15-node global network</li>
-                    <li>98.7% success rate</li>
-                    <li>Instant processing</li>
-                </ul>
-                <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=brandsiya@hotmail.com&amount=0.01&currency_code=USD&item_name=SeekReap+Test&return=https://brandsiya.github.io/SeekReap-Tier-4-Orchestrator/?pay_success=true&rm=2" target="_blank" class="price-cta paypal-btn">💳 PayPal $0.01</a>
-            </div>
-            <div class="price-card">
-                <h3>Custom</h3>
-                <div class="price-amount">$0.99 <span>/ one-time</span></div>
-                <p>For single video verification needs</p>
-                <ul class="price-features">
-                    <li>1 Facebook video verification</li>
-                    <li>SHA-256 certificate</li>
-                    <li>Priority processing</li>
-                    <li>Email support</li>
-                    <li>Certificate download</li>
-                </ul>
-                <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=brandsiya@hotmail.com&amount=0.99&currency_code=USD&item_name=SeekReap+Custom&return=https://brandsiya.github.io/SeekReap-Tier-4-Orchestrator/?pay_success=true&rm=2" target="_blank" class="price-cta paypal-btn">💳 PayPal $0.99</a>
-            </div>
-            <div class="price-card popular">
-                <div class="price-badge">Best Value</div>
-                <h3>Bronze</h3>
-                <div class="price-amount">$9.99 <span>/ month</span></div>
-                <p>For creators needing regular verification</p>
-                <ul class="price-features">
-                    <li>10 videos per month</li>
-                    <li>Priority processing</li>
-                    <li>Email & chat support</li>
-                    <li>Bulk certificate export</li>
-                    <li>Success rate analytics</li>
-                </ul>
-                <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=brandsiya@hotmail.com&amount=9.99&currency_code=USD&item_name=SeekReap+Bronze&return=https://brandsiya.github.io/SeekReap-Tier-4-Orchestrator/?pay_success=true&rm=2" target="_blank" class="price-cta paypal-btn">💳 PayPal $9.99</a>
-            </div>
-        </div>
-    </section>
-
-    <!-- Newsletter -->
-    <section class="newsletter">
-        <h2 style="color: white;">Get Updates</h2>
-        <p>Subscribe to get notified about new features and success stories.</p>
-        <div class="newsletter-input">
-            <input type="email" placeholder="Your email address">
-            <button onclick="subscribeNewsletter()">Subscribe</button>
-        </div>
-    </section>
-
-    <!-- Vertical Menu Links -->
-    <div style="background:#f1f5f9;padding:3rem 20px;">
-        <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:2rem;">
-            <div>
-                <h4 style="color:#1f2937;margin-bottom:1rem;font-size:1.1rem;"><i class="fas fa-compass" style="color:#667eea;margin-right:0.5rem;"></i> Navigation</h4>
-                <ul style="list-style:none;padding:0;">
-                    <li><a href="index.html" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-home" style="color:#667eea;"></i> Home</a></li>
-                    <li><a href="about.html" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-info-circle" style="color:#667eea;"></i> About</a></li>
-                    <li><a href="whofor.html" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-users" style="color:#667eea;"></i> Who It's For</a></li>
-                    <li><a href="whyexists.html" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-question-circle" style="color:#667eea;"></i> Why It Exists</a></li>
-                    <li><a href="howitworks.html" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-play-circle" style="color:#667eea;"></i> How it Works</a></li>
-                </ul>
-            </div>
-            <div>
-                <h4 style="color:#1f2937;margin-bottom:1rem;font-size:1.1rem;"><i class="fas fa-shield-alt" style="color:#00c851;margin-right:0.5rem;"></i> Legal</h4>
-                <ul style="list-style:none;padding:0;">
-                    <li><a href="terms.html" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-file-contract" style="color:#00c851;"></i> Terms of Service</a></li>
-                    <li><a href="privacy.html" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-lock" style="color:#00c851;"></i> Privacy Policy</a></li>
-                    <li><a href="contact.html" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-envelope" style="color:#00c851;"></i> Contact</a></li>
-                </ul>
-            </div>
-            <div>
-                <h4 style="color:#1f2937;margin-bottom:1rem;font-size:1.1rem;"><i class="fas fa-cube" style="color:#764ba2;margin-right:0.5rem;"></i> Services</h4>
-                <ul style="list-style:none;padding:0;">
-                    <li><a href="index.html#pricing" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-tags" style="color:#764ba2;"></i> Pricing Plans</a></li>
-                    <li><a href="auth.html" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-user-plus" style="color:#764ba2;"></i> Invite Creator</a></li>
-                    <li><a href="auth.html" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-sign-in-alt" style="color:#764ba2;"></i> Sign Up / Sign In</a></li>
-                </ul>
-            </div>
-            <div>
-                <h4 style="color:#1f2937;margin-bottom:1rem;font-size:1.1rem;"><i class="fas fa-handshake" style="color:#f59e0b;margin-right:0.5rem;"></i> Support</h4>
-                <ul style="list-style:none;padding:0;">
-                    <li><a href="contact.html" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-headset" style="color:#f59e0b;"></i> Get Support</a></li>
-                    <li><a href="mailto:support@seekreap.com" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;text-decoration:none;transition:all 0.2s;"><i class="fas fa-envelope" style="color:#f59e0b;"></i> support@seekreap.com</a></li>
-                    <li style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;color:#4b5563;"><i class="fas fa-map-marker-alt" style="color:#f59e0b;"></i> Cape Town, South Africa</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-
-    <!-- Footer -->
-    <footer>
-        <p>&copy; 2026 SeekReap. All rights reserved.</p>
-        <p style="margin-top: 1rem; opacity: 0.8;">
-            <a href="index.html" style="color: #00c851; margin: 0 1rem;">Home</a> |
-            <a href="about.html" style="color: #00c851; margin: 0 1rem;">About</a> |
-            <a href="whofor.html" style="color: #00c851; margin: 0 1rem;">Who It's For</a> |
-            <a href="whyexists.html" style="color: #00c851; margin: 0 1rem;">Why It Exists</a>
-        </p>
-    </footer>
-
-    <script>
-        // Video testing counter
-        let videoTestCounter = 0;
-        const MAX_TEST_VIDEOS = 3;
-
-        function checkVideoLimit() {
-            const counter = localStorage.getItem('videoTestCounter');
-            return counter ? parseInt(counter) >= MAX_TEST_VIDEOS : false;
-        }
+        .header-top { display: flex; justify-content: space-between; align-items: center; padding: 0 20px; max-width: 1400px; margin: 0 auto; }
 
         function incrementVideoCounter() {
             let counter = localStorage.getItem('videoTestCounter');
@@ -286,7 +67,6 @@
             }
 
             const overlay = document.createElement('div');
-            overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(10,25,47,.98);display:flex;justify-content:center;align-items:center;z-index:2000;flex-direction:column;color:white;font-family:Inter,sans-serif;text-align:center;padding:2rem';
             overlay.innerHTML = `<div style="font-size:1.5rem;margin-bottom:2rem;">VERIFYING ${tier.toUpperCase()} TIER...</div><div id="nodes" style="font-family:monospace;font-size:1rem;max-height:300px;overflow-y:auto;"></div>`;
             document.body.appendChild(overlay);
 
@@ -369,15 +149,13 @@
         });
 
         function toggleMobileNav() {
-            const nav = document.getElementById('mobileNav');
-            nav.classList.toggle('open');
-        }
-
-        function performSearch() {
-            const query = document.getElementById('mobileSearch').value;
-            alert(`Searching for: ${query}`);
-        }
-
+            <nav class="main-nav">
+                <a href="index.html" class="active">Home</a>
+                <a href="about.html">About</a>
+                <a href="whofor.html">Who It's For</a>
+                <a href="whyexists.html">Why It Exists</a>
+                <a href="#pricing">Pricing</a>
+            </nav>
         function subscribeNewsletter() {
             alert('Thank you for subscribing!');
         }
