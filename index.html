@@ -80,15 +80,49 @@
         .price-features{list-style:none;margin-bottom:2.5rem}
         .price-features li{padding:1rem 0;display:flex;align-items:center;justify-content:center;gap:0.75rem;font-size:1rem}
         .price-cta{width:100%;padding:1.5rem;background:var(--success);color:white;border:none;border-radius:12px;font-size:1.1rem;font-weight:600;cursor:pointer;transition:all 0.2s}
-.paypal-btn {
+.paypal-btn, .price-cta[href*="paypal"] {
+    background: linear-gradient(135deg, #0070ba 0%, #003087 100%) !important;
+    border: 2px solid #005ea6 !important;
+    color: white !important;
+    font-weight: 600 !important;
+    text-decoration: none !important;
+    display: inline-block !important;
+    padding: 1.25rem 2.5rem !important;
+    border-radius: 50px !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 0 8px 25px rgba(0,112,186,0.3) !important;
+    font-size: 1.1rem !important;
+}
+.paypal-btn:hover, .price-cta[href*="paypal"]:hover {
+    background: linear-gradient(135deg, #005ea6 0%, #002666 100%) !important;
+    transform: translateY(-2px) scale(1.05) !important;
+    box-shadow: 0 15px 35px rgba(0,112,186,0.4) !important;
+}
     background: linear-gradient(135deg, #0070ba 0%, #003087 100%) !important;
     margin-top: 1rem;
 }
-.paypal-btn:hover {
     background: linear-gradient(135deg, #005ea6 0%, #002666 100%) !important;
     transform: scale(1.02);
 }
         .price-cta:hover{background:#00a843;transform:scale(1.02)}
+.paypal-btn, .price-cta[href*="paypal"] {
+    background: linear-gradient(135deg, #0070ba 0%, #003087 100%) !important;
+    border: 2px solid #005ea6 !important;
+    color: white !important;
+    font-weight: 600 !important;
+    text-decoration: none !important;
+    display: inline-block !important;
+    padding: 1.25rem 2.5rem !important;
+    border-radius: 50px !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 0 8px 25px rgba(0,112,186,0.3) !important;
+    font-size: 1.1rem !important;
+}
+.paypal-btn:hover, .price-cta[href*="paypal"]:hover {
+    background: linear-gradient(135deg, #005ea6 0%, #002666 100%) !important;
+    transform: translateY(-2px) scale(1.05) !important;
+    box-shadow: 0 15px 35px rgba(0,112,186,0.4) !important;
+}
 
         /* FOOTER - WITH COPYRIGHT */
         footer{background:var(--dark);color:white;padding:3rem 20px 1.5rem;text-align:center}
@@ -214,7 +248,25 @@
                     <li><i class="fas fa-check"></i> SHA-256 certificate</li>
                     <li><i class="fas fa-check"></i> 15-node consensus</li>
                 </ul>
-                 <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick<a href="auth.html" class="price-cta">TEST NOW →</a>business=brandsiya@hotmail.com<a href="auth.html" class="price-cta">TEST NOW →</a>amount=0.01¤cy_code=USD<a href="auth.html" class="price-cta">TEST NOW →</a>item_name=SeekReap+Test" target="_blank" class="price-cta" style="background:#0070ba">💳 PayPal $0.01</a> 
+                 <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick<a href="auth.html" class="price-cta paypal-btn">TEST NOW →</a>business=brandsiya@hotmail.com<a href="auth.html" class="price-cta paypal-btn">TEST NOW →</a>amount=0.01¤cy_code=USD<a href="auth.html" class="price-cta paypal-btn">TEST NOW →</a>item_name=SeekReap+Test" target="_blank" class="price-cta paypal-btn" style="background:#0070ba">💳 PayPal $0.01</a> 
+.paypal-btn, .price-cta[href*="paypal"] {
+    background: linear-gradient(135deg, #0070ba 0%, #003087 100%) !important;
+    border: 2px solid #005ea6 !important;
+    color: white !important;
+    font-weight: 600 !important;
+    text-decoration: none !important;
+    display: inline-block !important;
+    padding: 1.25rem 2.5rem !important;
+    border-radius: 50px !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 0 8px 25px rgba(0,112,186,0.3) !important;
+    font-size: 1.1rem !important;
+}
+.paypal-btn:hover, .price-cta[href*="paypal"]:hover {
+    background: linear-gradient(135deg, #005ea6 0%, #002666 100%) !important;
+    transform: translateY(-2px) scale(1.05) !important;
+    box-shadow: 0 15px 35px rgba(0,112,186,0.4) !important;
+}
             </div>
             <div class="price-card recommended">
                 <div class="popular">MOST POPULAR</div>
@@ -226,7 +278,25 @@
                     <li><i class="fas fa-check"></i> Priority processing</li>
                     <li><i class="fas fa-check"></i> Direct download</li>
                 </ul>
-                 <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick<a href="auth.html" class="price-cta">PayPal $0.99</a>business=brandsiya@hotmail.com<a href="auth.html" class="price-cta">PayPal $0.99</a>amount=0.01¤cy_code=USD<a href="auth.html" class="price-cta">PayPal $0.99</a>item_name=SeekReap+Test" target="_blank" class="price-cta" style="background:#0070ba">💳 PayPal $0.01</a> 
+                 <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick<a href="auth.html" class="price-cta paypal-btn">PayPal $0.99</a>business=brandsiya@hotmail.com<a href="auth.html" class="price-cta paypal-btn">PayPal $0.99</a>amount=0.01¤cy_code=USD<a href="auth.html" class="price-cta paypal-btn">PayPal $0.99</a>item_name=SeekReap+Test" target="_blank" class="price-cta paypal-btn" style="background:#0070ba">💳 PayPal $0.01</a> 
+.paypal-btn, .price-cta[href*="paypal"] {
+    background: linear-gradient(135deg, #0070ba 0%, #003087 100%) !important;
+    border: 2px solid #005ea6 !important;
+    color: white !important;
+    font-weight: 600 !important;
+    text-decoration: none !important;
+    display: inline-block !important;
+    padding: 1.25rem 2.5rem !important;
+    border-radius: 50px !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 0 8px 25px rgba(0,112,186,0.3) !important;
+    font-size: 1.1rem !important;
+}
+.paypal-btn:hover, .price-cta[href*="paypal"]:hover {
+    background: linear-gradient(135deg, #005ea6 0%, #002666 100%) !important;
+    transform: translateY(-2px) scale(1.05) !important;
+    box-shadow: 0 15px 35px rgba(0,112,186,0.4) !important;
+}
             </div>
             <div class="price-card">
                 <div class="price-header">Bronze Pack</div>
@@ -237,7 +307,25 @@
                     <li><i class="fas fa-check"></i> Standard support</li>
                     <li><i class="fas fa-check"></i> Bulk processing</li>
                 </ul>
-                 <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick<a href="auth.html" class="price-cta">PayPal $9.99</a>business=brandsiya@hotmail.com<a href="auth.html" class="price-cta">PayPal $9.99</a>amount=0.01¤cy_code=USD<a href="auth.html" class="price-cta">PayPal $9.99</a>item_name=SeekReap+Test" target="_blank" class="price-cta" style="background:#0070ba">💳 PayPal $0.01</a> 
+                 <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick<a href="auth.html" class="price-cta paypal-btn">PayPal $9.99</a>business=brandsiya@hotmail.com<a href="auth.html" class="price-cta paypal-btn">PayPal $9.99</a>amount=0.01¤cy_code=USD<a href="auth.html" class="price-cta paypal-btn">PayPal $9.99</a>item_name=SeekReap+Test" target="_blank" class="price-cta paypal-btn" style="background:#0070ba">💳 PayPal $0.01</a> 
+.paypal-btn, .price-cta[href*="paypal"] {
+    background: linear-gradient(135deg, #0070ba 0%, #003087 100%) !important;
+    border: 2px solid #005ea6 !important;
+    color: white !important;
+    font-weight: 600 !important;
+    text-decoration: none !important;
+    display: inline-block !important;
+    padding: 1.25rem 2.5rem !important;
+    border-radius: 50px !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 0 8px 25px rgba(0,112,186,0.3) !important;
+    font-size: 1.1rem !important;
+}
+.paypal-btn:hover, .price-cta[href*="paypal"]:hover {
+    background: linear-gradient(135deg, #005ea6 0%, #002666 100%) !important;
+    transform: translateY(-2px) scale(1.05) !important;
+    box-shadow: 0 15px 35px rgba(0,112,186,0.4) !important;
+}
             </div>
         </div>
     </section>
