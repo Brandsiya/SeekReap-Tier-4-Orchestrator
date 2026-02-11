@@ -112,26 +112,10 @@
     transition: transform 0.3s;
     }
     
-    /* REMOVED: Hamburger to X transformation styles */
-    /* .desktop-hamburger.active span:nth-child(1),
-    .mobile-hamburger.active span:nth-child(1) {
-    transform: rotate(45deg) translate(5px, 5px);
-    }
-    
-    .desktop-hamburger.active span:nth-child(2),
-    .mobile-hamburger.active span:nth-child(2) {
-    opacity: 0;
-    }
-    
-    .desktop-hamburger.active span:nth-child(3),
-    .mobile-hamburger.active span:nth-child(3) {
-    transform: rotate(-45deg) translate(7px, -6px);
-    } */
-    
-    /* Header Search (Matches image exactly) */
+    /* Header Search (Matches image exactly) - UPDATED: Increased width */
     .header-search {
     flex: 1;
-    max-width: 500px;
+    max-width: 800px;
     display: none;
     }
     
@@ -143,6 +127,7 @@
     padding: 0 15px;
     height: 44px;
     transition: all 0.2s;
+    width: 100%;
     }
     
     .search-container input {
@@ -153,6 +138,7 @@
     font-size: 15px;
     color: var(--dark);
     outline: none;
+    width: 100%;
     }
     
     .search-container input::placeholder {
@@ -313,7 +299,7 @@
     transform: translateX(0);
     }
     
-    /* UPDATED: Side menu close button positioning */
+    /* UPDATED: Side menu close button positioning - applied to ALL views */
     .side-menu-close {
     position: absolute;
     top: 20px;
@@ -331,7 +317,6 @@
     justify-content: center;
     border-radius: 50%;
     transition: background-color 0.2s;
-    display: none;
     z-index: 51;
     }
     
@@ -339,7 +324,7 @@
     background: rgba(255,255,255,0.1);
     }
     
-    /* ADDED: Menu title on left side */
+    /* UPDATED: Menu title on left side - applied to ALL views */
     .side-menu-title {
     position: absolute;
     top: 20px;
@@ -347,7 +332,6 @@
     color: white;
     font-size: 1.2rem;
     font-weight: 600;
-    display: none;
     }
     
     .side-menu-content {
@@ -419,7 +403,7 @@
     line-height: 1.4;
     }
     
-    /* ===== OVERLAY ===== */
+    /* ===== OVERLAY ===== - UPDATED: Removed opacity/transparency effect */
     .overlay {
     position: fixed;
     top: 70px;
@@ -437,7 +421,7 @@
     .overlay.active {
     opacity: 1;
     visibility: visible;
-    background: rgba(0,0,0,0.5);
+    background: rgba(0,0,0,0.8);
     display: block;
     }
     
@@ -1027,7 +1011,7 @@
     padding: 0 8%;
     }
     .header-search {
-    max-width: 600px;
+    max-width: 900px;
     }
     }
     
@@ -1045,11 +1029,12 @@
     .desktop-hamburger { 
     display: flex; 
     }
+    /* UPDATED: Show close button and title on desktop too */
     .side-menu-close { 
-    display: none; 
+    display: flex; 
     }
     .side-menu-title {
-    display: none;
+    display: block;
     }
     .menu-signin { 
     display: none; 
@@ -1096,11 +1081,12 @@
     .footer-content {
     padding: 0 4%;
     }
+    /* UPDATED: Show close button and title on tablet too */
     .side-menu-close { 
-    display: ; 
+    display: flex; 
     }
     .side-menu-title {
-    display: ;
+    display: block;
     }
     .menu-signin { 
     display: none; 
@@ -1114,7 +1100,7 @@
     }
     
     .header-search {
-    max-width: 400px;
+    max-width: 600px;
     }
     }
     
@@ -1150,20 +1136,13 @@
     width: 100%;
     }
     
-    /* UPDATED: Show close button and title on mobile */
+    /* UPDATED: Show close button and title on mobile - already set in global */
     .side-menu-close {
     display: flex;
-    position: absolute;
-    top: 15px;
-    right: 15px;
-    left: auto;
     }
     
     .side-menu-title {
     display: block;
-    position: absolute;
-    top: 20px;
-    left: 20px;
     }
     
     .menu-signin {
@@ -1282,8 +1261,8 @@
     
     .side-menu-close {
     top: 15px;
-    left: auto;
     right: 15px;
+    left: auto;
     font-size: 2rem;
     }
     
@@ -1460,7 +1439,7 @@
                 <a href="#" class="logo">SeekReap</a>
             </div>
 
-            <!-- Desktop Search (matches image: "Search protocol status, content, or users...") -->
+            <!-- Desktop Search (matches image: "Search protocol status, content, or users...") - UPDATED: Wider search field -->
             <div class="header-search">
                 <div class="search-container">
                     <input type="text" placeholder="Search protocol status, content, or users...">
@@ -1474,8 +1453,8 @@
             <div class="header-right-group">
                 <div class="header-actions">
                     <!-- Sign In and Sign Up buttons (matches image exactly) -->
-                    <a href="dashboard-access.html" class="btn-signin">Sign In</a>
-                    <a href="dashboard-access.html" class="btn-signup-header">Sign Up</a>
+                    <a href="#" class="btn-signin">Sign In</a>
+                    <a href="#" class="btn-signup-header">Sign Up</a>
                     
                     <!-- More Menu (Vertical Dots) - UPDATED: Now visible on mobile too -->
                     <div class="more-menu-container">
@@ -1507,7 +1486,7 @@
                     <!-- Share Button - UPDATED: Changed to arrow icon -->
                     <button class="icon-btn" id="share-trigger" title="Share">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/>
+                            <path d="M5 12v7c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-7M12 2v15M9 7l3-3 3 3"/>
                         </svg>
                     </button>
                 </div>
@@ -1529,50 +1508,65 @@
     <div class="content-container">
         <!-- Side Menu -->
         <nav class="side-menu" id="side-menu">
-            <!-- UPDATED: Added Menu title on left side -->
+            <!-- UPDATED: Added Menu title on left side - visible on ALL views -->
             <div class="side-menu-title">Menu</div>
-            <!-- UPDATED: Close button on right side -->
+            <!-- UPDATED: Close button on right side - visible on ALL views -->
             <button class="side-menu-close" id="menu-close">&times;</button>
             <div class="side-menu-content">
                 <!-- Mobile-only Sign In/Sign Up buttons (inline) -->
                 <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                    <a href="dashboard-access.html" class="menu-signin">Sign In</a>
-                    <a href="dashboard-access.html" class="menu-signin">Sign Up</a>
+                    <a href="#" class="menu-signin">Sign In</a>
+                    <a href="#" class="menu-signin">Sign Up</a>
                 </div>
                 
                 <hr>
-               
-                 <a href="index.html">
+                <a href="#">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
                         <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
                     </svg>
                     Home
                 </a>
-                <a href="about.html">
+                <a href="#">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
                         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
                     </svg>
-                    About
+                    Dashboard
                 </a>
-                <a href="whofor.html">
+                <a href="#">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
                         <path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/>
                     </svg>
-                    Who is SeekReap for
+                    My Content
                 </a>
-                <a href="whyexists.html">
+                <a href="#">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
                         <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
                     </svg>
-                    Why SeekReap exists
+                    Analytics
                 </a>
-                <a href="howitworks.html">
+                <a href="#">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
                         <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
                     </svg>
-                    How SeekReap works
-     
-
+                    Settings
+                </a>
+                <hr>
+                <a href="#">Pricing</a>
+                <a href="#">Help Center</a>
+                <a href="#">Documentation</a>
+                <a href="#">Community</a>
+                <a href="#">Blog</a>
+                <a href="#">News</a>
+                <a href="#">Events</a>
+                <a href="#">Webinars</a>
+                <a href="#">Tutorials</a>
+                <a href="#">Case Studies</a>
+                <a href="#">Testimonials</a>
+                <a href="#">Partners</a>
+                <a href="#">Careers</a>
+                <a href="#">Investors</a>
+                <a href="#">Press Kit</a>
+                
                 <!-- ADDED: New links below "How it works" section -->
                 <a href="terms.html">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
@@ -1586,16 +1580,13 @@
                     </svg>
                     Privacy Policy
                 </a>
-
-                 <a href="contact.html">
+                <a href="contact.html">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
                         <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z"/>
                     </svg>
                     Contact
                 </a>
-
-                <hr>            
-
+                
                 <!-- Side Menu Footer Content -->
                 <div class="side-menu-footer">
                     <h4>Need Help?</h4>
@@ -1609,13 +1600,14 @@
             </div>
         </nav>
 
-        <!-- Overlay for mobile menu -->
+        <!-- Overlay for mobile menu - UPDATED: Removed opacity effect -->
         <div class="overlay" id="overlay"></div>
         
         <!-- Main Content Area -->
         <div class="main-content-wrapper">
             <main>
             
+HERO SECTION -->
             <section class="professional-hero" id="home">
             <div class="hero-content">
             <div class="trust-badge">
@@ -1860,16 +1852,13 @@
             </div>
             
             <div class="footer-links">
-   <a href="index.html" class="footer-link">Home</a>
-   <a href="about.html" class="footer-link">About</a>
-   <a href="whofor.html" class="footer-link">Who is SeekReap for</a>
-   <a href="whyexists.html" class="footer-link">Why SeekReap exists</a>
-   <a href="howitworks.html" class="footer-link">How SeekReap works</a>
-   <a href="terms.html" class="footer-link">Terms of Use</a>
-  <a href="privacy.html" class="footer-link">Privacy Policy</a>
-  <a href="contact.html" class="footer-link">Contact</a>        
-
- </div>
+                <a href="#" class="footer-link">About</a>
+                <a href="#" class="footer-link">How It Works</a>
+                <a href="#" class="footer-link">Pricing</a>
+                <a href="terms.html" class="footer-link">Terms of Service</a>
+                <a href="privacy.html" class="footer-link">Privacy Policy</a>
+                <a href="contact.html" class="footer-link">Contact</a>
+            </div>
             
             <div class="copyright">
                 © 2026 SeekReap. All rights reserved. | Tier-0 Protocol v1.0.0 (Frozen) | Last updated: February 10, 2026
@@ -1996,12 +1985,6 @@
     state.isMenuOpen = true;
     
     // REMOVED: No longer adding active class to hamburger icons
-    // const isMobile = window.innerWidth <= 820;
-    // if (isMobile) {
-    // mobileMenuOpen.classList.add('active');
-    // } else {
-    // desktopMenuOpen.classList.add('active');
-    // }
     
     // Prevent body scroll on mobile
     const isMobile = window.innerWidth <= 820;
@@ -2016,8 +1999,6 @@
     state.isMenuOpen = false;
     
     // REMOVED: No longer removing active class from hamburger icons
-    // mobileMenuOpen.classList.remove('active');
-    // desktopMenuOpen.classList.remove('active');
     
     // Restore body scroll
     document.body.classList.remove('menu-open');
