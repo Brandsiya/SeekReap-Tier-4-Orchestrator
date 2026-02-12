@@ -112,7 +112,7 @@
     transition: transform 0.3s;
     }
     
-    /* Header Search - UPDATED: Increased width */
+    /* Header Search */
     .header-search {
     flex: 1;
     max-width: 800px;
@@ -145,7 +145,7 @@
     color: var(--gray);
     }
     
-    /* Header Right Group (Sign In | Sign Up buttons) */
+    /* Header Right Group */
     .header-right-group {
     display: flex;
     align-items: center;
@@ -159,7 +159,7 @@
     gap: 15px;
     }
     
-    /* Sign In Button (Matches image) */
+    /* Sign In Button - UPDATED: Redirect to dashboard-access.html */
     .btn-signin {
     color: var(--dark);
     text-decoration: none;
@@ -176,7 +176,7 @@
     background: #f8f9fa;
     }
     
-    /* Sign Up Button (Matches image) */
+    /* Sign Up Button - UPDATED: Redirect to dashboard-access.html */
     .btn-signup-header {
     background: var(--dark);
     color: white;
@@ -299,7 +299,7 @@
     transform: translateX(0);
     }
     
-    /* UPDATED: Side menu close button positioning - applied to ALL views */
+    /* Side menu close button positioning */
     .side-menu-close {
     position: absolute;
     top: 20px;
@@ -324,7 +324,7 @@
     background: rgba(255,255,255,0.1);
     }
     
-    /* UPDATED: Menu title on left side - applied to ALL views */
+    /* Menu title on left side */
     .side-menu-title {
     position: absolute;
     top: 20px;
@@ -370,6 +370,7 @@
     margin: 25px 0;
     }
     
+    /* UPDATED: Sign In/Sign Up buttons in sidebar redirect to dashboard-access.html */
     .menu-signin {
     background: rgba(0, 200, 81, 0.1);
     color: var(--success) !important;
@@ -403,7 +404,7 @@
     line-height: 1.4;
     }
     
-    /* ===== OVERLAY ===== - FIXED: No opacity effect on main content */
+    /* ===== OVERLAY ===== */
     .overlay {
     position: fixed;
     top: 70px;
@@ -425,7 +426,7 @@
     display: block;
     }
     
-    /* FIXED: Prevent opacity effect on main content when sidebar is open */
+    /* FIXED: Main content - NO opacity effect when sidebar is open */
     .main-content-wrapper {
     flex: 1;
     margin-left: 0;
@@ -438,7 +439,10 @@
     overflow: visible;
     opacity: 1 !important;
     filter: none !important;
-    background: transparent !important;
+    -webkit-filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: #f9fafb !important;
     }
     
     .side-menu.active ~ .main-content-wrapper {
@@ -446,7 +450,10 @@
     width: calc(100% - var(--sidebar-width));
     opacity: 1 !important;
     filter: none !important;
-    background: transparent !important;
+    -webkit-filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: #f9fafb !important;
     }
     
     main {
@@ -458,6 +465,9 @@
     width: 100%;
     opacity: 1 !important;
     filter: none !important;
+    -webkit-filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     background: transparent !important;
     }
     
@@ -943,6 +953,7 @@
     box-shadow: 0 6px 20px rgba(0, 200, 81, 0.3);
     }
     
+    /* UPDATED: Footer links - only specified links */
     .footer-links {
     display: flex;
     justify-content: center;
@@ -1055,7 +1066,10 @@
     width: calc(100% - var(--sidebar-width));
     opacity: 1 !important;
     filter: none !important;
-    background: transparent !important;
+    -webkit-filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: #f9fafb !important;
     }
     }
     
@@ -1106,7 +1120,10 @@
     .main-content-wrapper {
     opacity: 1 !important;
     filter: none !important;
-    background: transparent !important;
+    -webkit-filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: #f9fafb !important;
     }
     }
     
@@ -1142,7 +1159,10 @@
     width: 100%;
     opacity: 1 !important;
     filter: none !important;
-    background: transparent !important;
+    -webkit-filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: #f9fafb !important;
     }
     
     .side-menu-close {
@@ -1163,7 +1183,10 @@
     margin-top: 122px;
     opacity: 1 !important;
     filter: none !important;
-    background: transparent !important;
+    -webkit-filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: #f9fafb !important;
     }
     
     .mobile-hamburger {
@@ -1195,6 +1218,9 @@
     padding-right: 4%;
     opacity: 1 !important;
     filter: none !important;
+    -webkit-filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     background: transparent !important;
     }
     
@@ -1268,7 +1294,10 @@
     margin-top: 112px;
     opacity: 1 !important;
     filter: none !important;
-    background: transparent !important;
+    -webkit-filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: #f9fafb !important;
     }
     
     .footer-cta h3 {
@@ -1293,6 +1322,9 @@
     padding-right: 3%;
     opacity: 1 !important;
     filter: none !important;
+    -webkit-filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     background: transparent !important;
     }
     
@@ -1329,7 +1361,10 @@
     .main-content-wrapper {
     opacity: 1 !important;
     filter: none !important;
-    background: transparent !important;
+    -webkit-filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: #f9fafb !important;
     }
     }
     
@@ -1447,24 +1482,24 @@
     
 </head>
 <body>
-    <!-- Fixed Header (matches the image exactly) -->
+    <!-- Fixed Header -->
     <div class="sticky-wrapper">
         <header class="main-header">
             <div class="header-left">
-                <!-- Desktop Hamburger (hidden on mobile) -->
+                <!-- Desktop Hamburger -->
                 <div class="desktop-hamburger" id="desktop-menu-open">
                     <span></span><span></span><span></span>
                 </div>
                 
-                <!-- Mobile Hamburger (only on mobile) -->
+                <!-- Mobile Hamburger -->
                 <div class="mobile-hamburger" id="mobile-menu-open">
                     <span></span><span></span><span></span>
                 </div>
                 
-                <a href="#" class="logo">SeekReap</a>
+                <a href="index.html" class="logo">SeekReap</a>
             </div>
 
-            <!-- Desktop Search - UPDATED: Wider search field -->
+            <!-- Desktop Search -->
             <div class="header-search">
                 <div class="search-container">
                     <input type="text" placeholder="Search protocol status, content, or users...">
@@ -1474,12 +1509,12 @@
                 </div>
             </div>
 
-            <!-- Header Right Group (matches image: Sign In | Sign Up buttons) -->
+            <!-- Header Right Group -->
             <div class="header-right-group">
                 <div class="header-actions">
-                    <!-- Sign In and Sign Up buttons (matches image exactly) -->
-                    <a href="#" class="btn-signin">Sign In</a>
-                    <a href="#" class="btn-signup-header">Sign Up</a>
+                    <!-- Sign In and Sign Up buttons - UPDATED: Redirect to dashboard-access.html -->
+                    <a href="dashboard-access.html" class="btn-signin">Sign In</a>
+                    <a href="dashboard-access.html" class="btn-signup-header">Sign Up</a>
                     
                     <!-- More Menu (Vertical Dots) -->
                     <div class="more-menu-container">
@@ -1508,7 +1543,7 @@
                         </div>
                     </div>
                     
-                    <!-- Share Button - FIXED: Changed to arrow icon exactly as shown in image -->
+                    <!-- Share Button - FIXED: Arrow icon exactly as in image -->
                     <button class="icon-btn" id="share-trigger" title="Share">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M5 12v7c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-7M12 2v15M9 7l3-3 3 3"/>
@@ -1517,9 +1552,9 @@
                 </div>
             </div>
         </header>
-    </div> <!-- Closing .sticky-wrapper -->
+    </div>
 
-    <!-- Mobile Search Strip (Outside sticky-wrapper) -->
+    <!-- Mobile Search Strip -->
     <div class="search-strip">
         <div class="search-container">
             <input type="text" placeholder="Search protocol status...">
@@ -1531,73 +1566,62 @@
 
     <!-- Content Container with Sidebar and Main Content -->
     <div class="content-container">
-        <!-- Side Menu -->
+        <!-- Side Menu - UPDATED: Only specified links -->
         <nav class="side-menu" id="side-menu">
-            <!-- Menu title on left side - applied to ALL views -->
+            <!-- Menu title on left side -->
             <div class="side-menu-title">Menu</div>
-            <!-- Close button on right side - applied to ALL views -->
+            <!-- Close button on right side -->
             <button class="side-menu-close" id="menu-close">&times;</button>
             <div class="side-menu-content">
-                <!-- Mobile-only Sign In/Sign Up buttons (inline) -->
+                <!-- Mobile-only Sign In/Sign Up buttons - UPDATED: Redirect to dashboard-access.html -->
                 <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                    <a href="#" class="menu-signin">Sign In</a>
-                    <a href="#" class="menu-signin">Sign Up</a>
+                    <a href="dashboard-access.html" class="menu-signin">Sign In</a>
+                    <a href="dashboard-access.html" class="menu-signin">Sign Up</a>
                 </div>
                 
                 <hr>
-                <a href="#">
+                <!-- UPDATED: Only these 9 links exactly as specified -->
+                <a href="index.html">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
                         <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
                     </svg>
                     Home
                 </a>
-                <a href="#">
+                <a href="about.html">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
-                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
                     </svg>
-                    Dashboard
+                    About
                 </a>
-                <a href="#">
+                <a href="whofor.html">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
-                        <path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/>
+                        <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm8 6v2c0 .55-.45 1-1 1h-2c-.55 0-1-.45-1-1v-2c0-2.21-1.79-4-4-4h-2c-2.21 0-4 1.79-4 4v2c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-2c0-3.31 2.69-6 6-6h2c3.31 0 6 2.69 6 6zM8 5c0 1.66-1.34 3-3 3S2 6.66 2 5s1.34-3 3-3 3 1.34 3 3z"/>
                     </svg>
-                    My Content
+                    Who is SeekReap for
                 </a>
-                <a href="#">
+                <a href="whyexists.html">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
-                        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
                     </svg>
-                    Analytics
+                    Why SeekReap exists
                 </a>
-                <a href="#">
+                <a href="howitworks.html">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
-                        <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"/>
                     </svg>
-                    Settings
+                    How SeekReap Works
                 </a>
-                <hr>
-                <a href="#">Pricing</a>
-                <a href="#">Help Center</a>
-                <a href="#">Documentation</a>
-                <a href="#">Community</a>
-                <a href="#">Blog</a>
-                <a href="#">News</a>
-                <a href="#">Events</a>
-                <a href="#">Webinars</a>
-                <a href="#">Tutorials</a>
-                <a href="#">Case Studies</a>
-                <a href="#">Testimonials</a>
-                <a href="#">Partners</a>
-                <a href="#">Careers</a>
-                <a href="#">Investors</a>
-                <a href="#">Press Kit</a>
-                
-                <!-- Links below "How it works" section -->
+                <a href="pricing.html">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
+                        <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"/>
+                    </svg>
+                    Pricing
+                </a>
                 <a href="terms.html">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
                         <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z"/>
                     </svg>
-                    Terms of Use
+                    Terms of Service
                 </a>
                 <a href="privacy.html">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
@@ -1631,8 +1655,7 @@
         <!-- Main Content Area - FIXED: No opacity effect -->
         <div class="main-content-wrapper">
             <main>
-            
-HERO SECTION -->
+            <!-- REMOVED: "HERO SECTION" text -->
             <section class="professional-hero" id="home">
             <div class="hero-content">
             <div class="trust-badge">
@@ -1864,10 +1887,10 @@ HERO SECTION -->
                 </section>
                  
                  </main>
-        </div> <!-- closing .main-content-wrapper -->
-    </div> <!-- closing .content-container -->
+        </div>
+    </div>
     
-    <!-- Footer -->
+    <!-- Footer - UPDATED: Only specified links -->
     <footer>
         <div class="footer-content">
             <div class="footer-cta">
@@ -1876,10 +1899,14 @@ HERO SECTION -->
                 <a href="#" class="cta-button">Start Verification Now →</a>
             </div>
             
+            <!-- UPDATED: Only these 9 links exactly as specified -->
             <div class="footer-links">
-                <a href="#" class="footer-link">About</a>
-                <a href="#" class="footer-link">How It Works</a>
-                <a href="#" class="footer-link">Pricing</a>
+                <a href="index.html" class="footer-link">Home</a>
+                <a href="about.html" class="footer-link">About</a>
+                <a href="whofor.html" class="footer-link">Who is SeekReap for</a>
+                <a href="whyexists.html" class="footer-link">Why SeekReap exists</a>
+                <a href="howitworks.html" class="footer-link">How SeekReap Works</a>
+                <a href="pricing.html" class="footer-link">Pricing</a>
                 <a href="terms.html" class="footer-link">Terms of Service</a>
                 <a href="privacy.html" class="footer-link">Privacy Policy</a>
                 <a href="contact.html" class="footer-link">Contact</a>
