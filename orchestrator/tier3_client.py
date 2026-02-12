@@ -4,8 +4,15 @@ import asyncio
 import logging
 
 class Tier3Client:
-    def __init__(self, base_url: str = "http://localhost:8000", max_retries: int = 3):
-        self.base_url = base_url
+
+import os
+
+class Tier3Client:
+    def __init__(self, base_url: str = None, max_retries: int = 3):
+        self.base_url = base_url or os.getenv(
+            "TIER3_BASE_URL",
+            "http://localhost:8000"  # fallback for local dev
+        )
         self.max_retries = max_retries
 
     async def execute_task(self, task_payload: Dict) -> Dict:
