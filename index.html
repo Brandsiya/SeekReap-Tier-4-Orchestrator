@@ -84,7 +84,7 @@
     letter-spacing: -0.5px;
     }
     
-    /* Hamburger Menus - REMOVED ACTIVE STATE STYLES that change to X */
+    /* Hamburger Menus */
     .desktop-hamburger,
     .mobile-hamburger {
     display: flex;
@@ -112,7 +112,7 @@
     transition: transform 0.3s;
     }
     
-    /* Header Search (Matches image exactly) - UPDATED: Increased width */
+    /* Header Search - UPDATED: Increased width */
     .header-search {
     flex: 1;
     max-width: 800px;
@@ -215,7 +215,7 @@
     transform: translateY(-1px);
     }
     
-    /* More Menu - UPDATED: Now visible on mobile too */
+    /* More Menu */
     .more-menu-container {
     position: relative;
     }
@@ -338,7 +338,7 @@
     flex: 1;
     overflow-y: auto;
     padding-bottom: 20px;
-    margin-top: 50px; /* Added margin to make room for title */
+    margin-top: 50px;
     }
     
     .side-menu a {
@@ -403,7 +403,7 @@
     line-height: 1.4;
     }
     
-    /* ===== OVERLAY ===== - UPDATED: Removed opacity/transparency effect */
+    /* ===== OVERLAY ===== - FIXED: No opacity effect on main content */
     .overlay {
     position: fixed;
     top: 70px;
@@ -425,15 +425,7 @@
     display: block;
     }
     
-    /* ===== MAIN CONTENT ===== */
-    .content-container {
-    display: flex;
-    flex: 1;
-    width: 100%;
-    position: relative;
-    min-height: 100vh;
-    }
-    
+    /* FIXED: Prevent opacity effect on main content when sidebar is open */
     .main-content-wrapper {
     flex: 1;
     margin-left: 0;
@@ -444,11 +436,17 @@
     transition: margin-left 0.3s ease;
     width: 100%;
     overflow: visible;
+    opacity: 1 !important;
+    filter: none !important;
+    background: transparent !important;
     }
     
     .side-menu.active ~ .main-content-wrapper {
     margin-left: var(--sidebar-width);
     width: calc(100% - var(--sidebar-width));
+    opacity: 1 !important;
+    filter: none !important;
+    background: transparent !important;
     }
     
     main {
@@ -458,6 +456,9 @@
     max-width: 1400px;
     margin: 0 auto;
     width: 100%;
+    opacity: 1 !important;
+    filter: none !important;
+    background: transparent !important;
     }
     
     h1 {
@@ -1029,7 +1030,6 @@
     .desktop-hamburger { 
     display: flex; 
     }
-    /* UPDATED: Show close button and title on desktop too */
     .side-menu-close { 
     display: flex; 
     }
@@ -1042,7 +1042,6 @@
     .btn-signin, .btn-signup-header { 
     display: inline-block; 
     }
-    /* UPDATED: More menu visible on desktop */
     .more-menu-container { 
     display: block; 
     }
@@ -1054,6 +1053,9 @@
     .main-content-wrapper {
     margin-left: var(--sidebar-width);
     width: calc(100% - var(--sidebar-width));
+    opacity: 1 !important;
+    filter: none !important;
+    background: transparent !important;
     }
     }
     
@@ -1081,7 +1083,6 @@
     .footer-content {
     padding: 0 4%;
     }
-    /* UPDATED: Show close button and title on tablet too */
     .side-menu-close { 
     display: flex; 
     }
@@ -1094,13 +1095,18 @@
     .btn-signin, .btn-signup-header { 
     display: inline-block; 
     }
-    /* UPDATED: More menu visible on tablet */
     .more-menu-container { 
     display: block; 
     }
     
     .header-search {
     max-width: 600px;
+    }
+    
+    .main-content-wrapper {
+    opacity: 1 !important;
+    filter: none !important;
+    background: transparent !important;
     }
     }
     
@@ -1134,9 +1140,11 @@
     .side-menu.active ~ .main-content-wrapper {
     margin-left: 0;
     width: 100%;
+    opacity: 1 !important;
+    filter: none !important;
+    background: transparent !important;
     }
     
-    /* UPDATED: Show close button and title on mobile - already set in global */
     .side-menu-close {
     display: flex;
     }
@@ -1153,6 +1161,9 @@
     margin-left: 0;
     width: 100%;
     margin-top: 122px;
+    opacity: 1 !important;
+    filter: none !important;
+    background: transparent !important;
     }
     
     .mobile-hamburger {
@@ -1167,7 +1178,6 @@
     display: none;
     }
     
-    /* UPDATED: More menu now visible on mobile too */
     .more-menu-container {
     display: block;
     }
@@ -1183,6 +1193,9 @@
     main {
     padding-left: 4%;
     padding-right: 4%;
+    opacity: 1 !important;
+    filter: none !important;
+    background: transparent !important;
     }
     
     .footer-content {
@@ -1253,6 +1266,9 @@
     
     .main-content-wrapper {
     margin-top: 112px;
+    opacity: 1 !important;
+    filter: none !important;
+    background: transparent !important;
     }
     
     .footer-cta h3 {
@@ -1275,6 +1291,9 @@
     main {
     padding-left: 3%;
     padding-right: 3%;
+    opacity: 1 !important;
+    filter: none !important;
+    background: transparent !important;
     }
     
     .footer-content {
@@ -1305,6 +1324,12 @@
     .side-menu {
     touch-action: auto;
     -webkit-overflow-scrolling: touch;
+    }
+    
+    .main-content-wrapper {
+    opacity: 1 !important;
+    filter: none !important;
+    background: transparent !important;
     }
     }
     
@@ -1439,7 +1464,7 @@
                 <a href="#" class="logo">SeekReap</a>
             </div>
 
-            <!-- Desktop Search (matches image: "Search protocol status, content, or users...") - UPDATED: Wider search field -->
+            <!-- Desktop Search - UPDATED: Wider search field -->
             <div class="header-search">
                 <div class="search-container">
                     <input type="text" placeholder="Search protocol status, content, or users...">
@@ -1456,7 +1481,7 @@
                     <a href="#" class="btn-signin">Sign In</a>
                     <a href="#" class="btn-signup-header">Sign Up</a>
                     
-                    <!-- More Menu (Vertical Dots) - UPDATED: Now visible on mobile too -->
+                    <!-- More Menu (Vertical Dots) -->
                     <div class="more-menu-container">
                         <button class="more-menu-btn icon-btn" id="more-menu-btn">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -1483,7 +1508,7 @@
                         </div>
                     </div>
                     
-                    <!-- Share Button - UPDATED: Changed to arrow icon -->
+                    <!-- Share Button - FIXED: Changed to arrow icon exactly as shown in image -->
                     <button class="icon-btn" id="share-trigger" title="Share">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M5 12v7c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-7M12 2v15M9 7l3-3 3 3"/>
@@ -1508,9 +1533,9 @@
     <div class="content-container">
         <!-- Side Menu -->
         <nav class="side-menu" id="side-menu">
-            <!-- UPDATED: Added Menu title on left side - visible on ALL views -->
+            <!-- Menu title on left side - applied to ALL views -->
             <div class="side-menu-title">Menu</div>
-            <!-- UPDATED: Close button on right side - visible on ALL views -->
+            <!-- Close button on right side - applied to ALL views -->
             <button class="side-menu-close" id="menu-close">&times;</button>
             <div class="side-menu-content">
                 <!-- Mobile-only Sign In/Sign Up buttons (inline) -->
@@ -1567,7 +1592,7 @@
                 <a href="#">Investors</a>
                 <a href="#">Press Kit</a>
                 
-                <!-- ADDED: New links below "How it works" section -->
+                <!-- Links below "How it works" section -->
                 <a href="terms.html">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 10px; vertical-align: middle;">
                         <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z"/>
@@ -1600,10 +1625,10 @@
             </div>
         </nav>
 
-        <!-- Overlay for mobile menu - UPDATED: Removed opacity effect -->
+        <!-- Overlay for mobile menu -->
         <div class="overlay" id="overlay"></div>
         
-        <!-- Main Content Area -->
+        <!-- Main Content Area - FIXED: No opacity effect -->
         <div class="main-content-wrapper">
             <main>
             
@@ -1984,8 +2009,6 @@ HERO SECTION -->
     overlay.classList.add('active');
     state.isMenuOpen = true;
     
-    // REMOVED: No longer adding active class to hamburger icons
-    
     // Prevent body scroll on mobile
     const isMobile = window.innerWidth <= 820;
     if (isMobile) {
@@ -1997,8 +2020,6 @@ HERO SECTION -->
     sideMenu.classList.remove('active');
     overlay.classList.remove('active');
     state.isMenuOpen = false;
-    
-    // REMOVED: No longer removing active class from hamburger icons
     
     // Restore body scroll
     document.body.classList.remove('menu-open');
@@ -2345,7 +2366,7 @@ HERO SECTION -->
     desktopMenuOpen.style.display = isMobile ? 'none' : 'flex';
     }
     
-    // UPDATED: More menu visibility - now visible on mobile too
+    // More menu visibility - visible on both mobile and desktop
     if (moreMenuBtn) {
     moreMenuBtn.style.display = isMobile ? 'flex' : 'flex';
     }
