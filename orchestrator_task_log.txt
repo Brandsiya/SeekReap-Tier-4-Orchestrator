@@ -3,3 +3,8 @@
 2026-02-01 15:47:03.650620 | task_005 | demo_pipeline | failed | 14.15244s
 2026-02-01 15:47:03.655630 | task_004 | demo_pipeline_high_priority | failed | 14.160609s
 2026-02-01 15:47:03.659511 | task_002 | demo_pipeline_high_priority | failed | 14.168302s
+2026-02-12 15:43:55.883287 | task_005 | demo_pipeline | failed | 14.201433s
+2026-02-12 15:43:55.887508 | task_004 | demo_pipeline_high_priority | failed | 14.211048s
+2026-02-12 15:43:55.891901 | task_001 | demo_pipeline | failed | 14.213227s
+2026-02-12 15:43:55.896865 | task_002 | demo_pipeline_high_priority | failed | 14.222547s
+2026-02-12 15:43:55.901818 | task_003 | demo_pipeline | failed | 14.221275s
