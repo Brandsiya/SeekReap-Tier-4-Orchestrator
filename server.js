@@ -1,21 +1,37 @@
 const express = require('express');
+const bodyParser = require('body-parser');
+const path = require('path');
 const { processVideo } = require('./pipelines/processVideos');
 
 const app = express();
-app.use(express.json());
+app.use(bodyParser.json());
 
-const PORT = process.env.PORT || 5000;
+// Serve reports folder
+app.use('/reports', express.static(path.join(__dirname, 'pipelines/reports')));
 
 app.post('/process-video', async (req, res) => {
+  try {
     const videoData = req.body;
-    try {
-        const report = await processVideo(videoData);
-        res.json({ success: true, report });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    if (!videoData.creatorId || !videoData.videoUrl || !videoData.title) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
+
+    const report = await processVideo(videoData);
+
+    // Return public URLs for Render
+    const baseUrl = process.env.BASE_URL || 'https://seekreap-system.onrender.com';
+    res.json({
+      success: true,
+      reportId: report.reportId,
+      jsonUrl: `${baseUrl}/reports/${report.reportId}.json`,
+      pdfUrl: `${baseUrl}/reports/${report.reportId}.pdf`,
+      tier5Result: report.tier5Result
+    });
+  } catch (err) {
+    console.error('Processing failed:', err.message);
+    res.status(500).json({ error: 'Processing failed' });
+  }
 });
 
-app.get('/health', (req, res) => res.send('Tier-4 is healthy ✅'));
-
-app.listen(PORT, () => console.log(`Tier-4 running on port ${PORT}`));
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`🚀 Tier-4 server running on port ${PORT}`));
