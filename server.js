@@ -5,24 +5,21 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware to parse JSON
+// Middleware
 app.use(express.json());
 
-// Serve the portal folder
-app.use(express.static(path.join(__dirname, 'SeekReap-Verif-Portal')));
+// Serve the verification portal
+app.use('/portal', express.static(path.join(__dirname, 'SeekReap-Verif-Portal')));
 
-// Redirect root URL to portal index.html
+// Root redirect to portal
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'SeekReap-Verif-Portal', 'index.html'));
+  res.redirect('/portal');
 });
 
-// Endpoint to process videos
+// Video processing endpoint
 app.post('/process-video', (req, res) => {
   const { creatorId, videoUrl, title, usesThirdPartyMusic } = req.body;
-
-  if (!creatorId || !videoUrl || !title) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
+  if (!creatorId || !videoUrl || !title) return res.status(400).json({ error: 'Missing fields' });
 
   const videoId = `vid_${Date.now()}`;
   const result = { id: videoId, creatorId, title, status: 'processed', usesThirdPartyMusic };
@@ -36,7 +33,7 @@ app.post('/process-video', (req, res) => {
   res.json({ ...result, pdf: `/seekreap-tier4-db/${videoId}.pdf` });
 });
 
-// Endpoint to list all videos
+// List all videos
 app.get('/videos', (req, res) => {
   const dbPath = path.join(__dirname, 'seekreap-tier4-db', 'videos.json');
   let db = {};
