@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
-const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 
 const dbPath = path.join(__dirname, '../seekreap-tier4-db/videos.json');
@@ -12,7 +11,6 @@ async function processVideo({ creatorId, videoUrl, title, usesThirdPartyMusic })
     const db = JSON.parse(fs.readFileSync(dbPath));
     const videoId = uuidv4();
 
-    // Simulate processing
     const processed = {
       id: videoId,
       creatorId,
@@ -26,7 +24,6 @@ async function processVideo({ creatorId, videoUrl, title, usesThirdPartyMusic })
     db[videoId] = processed;
     fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
 
-    // Create PDF report
     const pdfPath = path.join(__dirname, `../seekreap-tier4-db/${videoId}.pdf`);
     const doc = new PDFDocument();
     doc.pipe(fs.createWriteStream(pdfPath));

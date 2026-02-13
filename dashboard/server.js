@@ -11,6 +11,7 @@ app.post('/process-video', async (req, res) => {
     const result = await processVideo(req.body);
     res.json(result);
   } catch (err) {
+    console.error('Full error stack:', err);
     res.status(500).json({ error: 'Processing failed', details: err.message });
   }
 });
