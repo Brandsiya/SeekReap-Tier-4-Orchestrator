@@ -3,6 +3,7 @@
     "axios": "^1.13.5",
     "body-parser": "^2.2.2",
     "chokidar": "^5.0.0",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "uuid": "^13.0.0"
   }
 }
