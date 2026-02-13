@@ -1,9 +1,9 @@
 services:
   - type: web
     name: seekreap-production
-    env: python
+    env: node
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.8
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+      - key: NODE_ENV
+        value: production
+    buildCommand: npm install
+    startCommand: node dashboard/server.js
