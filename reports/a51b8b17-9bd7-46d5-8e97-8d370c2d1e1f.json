@@ -1,0 +1,13 @@
+{
+  "reportId": "a51b8b17-9bd7-46d5-8e97-8d370c2d1e1f",
+  "creatorId": "creator_2",
+  "videoUrl": "https://example.com/another-video.mp4",
+  "title": "Second Test Video",
+  "usesThirdPartyMusic": false,
+  "timestamp": "2026-02-13T15:02:39.758Z",
+  "tier5Result": {
+    "ruleCheck": "Clean",
+    "aiPrediction": "Pass",
+    "finalDecision": "Approved"
+  }
+}

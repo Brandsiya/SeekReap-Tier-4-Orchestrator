@@ -1,0 +1,13 @@
+{
+  "reportId": "c4576445-a584-4d6f-8fdb-5047ac414089",
+  "creatorId": "creator_3",
+  "videoUrl": "https://example.com/video3.mp4",
+  "title": "Test Video 3",
+  "usesThirdPartyMusic": true,
+  "timestamp": "2026-02-13T15:05:42.000Z",
+  "tier5Result": {
+    "ruleCheck": "Flagged for review",
+    "aiPrediction": "Pass",
+    "finalDecision": "Manual Review"
+  }
+}
