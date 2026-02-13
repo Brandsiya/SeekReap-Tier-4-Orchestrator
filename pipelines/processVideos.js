@@ -51,3 +51,4 @@ async function processVideo(videoUrl, metadata) {
 
 // Export for external triggers (like API)
 module.exports = { processVideo };
+// DEPLOY TEST Fri Feb 13 06:38:34 UTC 2026
