@@ -1,54 +1,62 @@
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+const axios = require("axios");
 
-const DB_FILE = path.join(__dirname, 'seekreap-tier4-db/videos.json');
+const TIER5_BASE_URL = "https://seekreap-tier-5-orchestrator.onrender.com";
+const TIER5_TASK_URL = `${TIER5_BASE_URL}/task`;
+const TIER5_PING_URL = `${TIER5_BASE_URL}/ping`;
 
-// Load DB or initialize
-let db = [];
-if (fs.existsSync(DB_FILE)) {
-  db = JSON.parse(fs.readFileSync(DB_FILE));
+// Wake Tier-5 (handles Render cold starts)
+async function wakeTier5() {
+    try {
+        console.log("Waking Tier-5 service...");
+        await axios.get(TIER5_PING_URL, { timeout: 15000 });
+        console.log("Tier-5 is awake.");
+    } catch (err) {
+        console.log("Tier-5 wake attempt failed (may still be starting)...");
+    }
 }
 
-// Function to send to Tier-5
-async function sendToTier5(videoUrl, metadata) {
-  try {
-    const response = await axios.post(
-      'https://seekreap-tier-5-orchestrator.onrender.com/task', // live Tier-5 URL
-      { video: videoUrl, metadata },
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-    return response.data;
-  } catch (err) {
-    console.error('Tier-5 integration error:', err.message);
-    return null;
-  }
+async function processVideo(videoUrl, metadata = {}) {
+    try {
+        console.log("Processing video:", videoUrl);
+
+        // Step 1 — Wake Tier-5 (prevents 502 cold start)
+        await wakeTier5();
+
+        // Step 2 — Send task to Tier-5
+        const response = await axios.post(
+            TIER5_TASK_URL,
+            {
+                video: videoUrl,
+                metadata: metadata
+            },
+            {
+                headers: { "Content-Type": "application/json" },
+                timeout: 30000 // 30 seconds for cold start safety
+            }
+        );
+
+        if (!response.data || !response.data.success) {
+            throw new Error("Tier-5 returned invalid response");
+        }
+
+        console.log("Tier-5 Decision:", response.data.result);
+
+        return {
+            success: true,
+            tier5: response.data.result
+        };
+
+    } catch (error) {
+
+        console.error("Tier-5 integration error:", 
+            error.response?.data || error.message
+        );
+
+        return {
+            success: false,
+            error: "Tier-5 processing failed"
+        };
+    }
 }
 
-// Main function: process a video (triggered by API/webhook)
-async function processVideo(videoUrl, metadata) {
-  console.log('Processing video:', videoUrl);
-
-  const result = await sendToTier5(videoUrl, metadata);
-  if (!result) {
-    console.error('Failed to get Tier-5 decision');
-    return null;
-  }
-
-  console.log('Tier-5 decision:', result.result.finalDecision);
-
-  // Save to DB
-  db.push({
-    video: videoUrl,
-    metadata,
-    tier5Result: result.result,
-    timestamp: new Date().toISOString()
-  });
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
-
-  return result.result.finalDecision;
-}
-
-// Export for external triggers (like API)
-module.exports = { processVideo };
-// DEPLOY TEST Fri Feb 13 06:38:34 UTC 2026
+module.exports = processVideo;
