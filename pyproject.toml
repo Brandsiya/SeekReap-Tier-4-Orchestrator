@@ -1,5 +1,0 @@
-[tool.poetry]
-name = "seekreap-tier4-orchestrator"
-version = "0.1.0"
-description = "Orchestration layer for Tier-3 execution"
-authors = ["Your Name <you@example.com>"]
