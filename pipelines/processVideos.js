@@ -1,62 +1,58 @@
-const axios = require("axios");
+// pipelines/processVideos.js
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 
-const TIER5_BASE_URL = "https://seekreap-tier-5-orchestrator.onrender.com";
-const TIER5_TASK_URL = `${TIER5_BASE_URL}/task`;
-const TIER5_PING_URL = `${TIER5_BASE_URL}/ping`;
+// Logs directory for Tier-4
+const LOG_DIR = path.join(__dirname, '../logs');
+if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
-// Wake Tier-5 (handles Render cold starts)
-async function wakeTier5() {
-    try {
-        console.log("Waking Tier-5 service...");
-        await axios.get(TIER5_PING_URL, { timeout: 15000 });
-        console.log("Tier-5 is awake.");
-    } catch (err) {
-        console.log("Tier-5 wake attempt failed (may still be starting)...");
-    }
+// Log Tier-4 decisions locally
+function logTier4Decision(data) {
+    const timestamp = new Date().toISOString();
+    const logPath = path.join(LOG_DIR, 'tier4_decisions.json');
+    fs.appendFileSync(logPath, JSON.stringify({ timestamp, ...data }) + '\n');
 }
 
-async function processVideo(videoUrl, metadata = {}) {
+// Function to process a video
+async function processVideo({ creatorId, videoUrl, title, usesThirdPartyMusic }) {
     try {
-        console.log("Processing video:", videoUrl);
-
-        // Step 1 — Wake Tier-5 (prevents 502 cold start)
-        await wakeTier5();
-
-        // Step 2 — Send task to Tier-5
-        const response = await axios.post(
-            TIER5_TASK_URL,
-            {
-                video: videoUrl,
-                metadata: metadata
-            },
-            {
-                headers: { "Content-Type": "application/json" },
-                timeout: 30000 // 30 seconds for cold start safety
+        // Payload for Tier-5
+        const payload = {
+            metadata: {
+                title,
+                usesThirdPartyMusic
             }
+        };
+
+        // Call Tier-5 live endpoint
+        const response = await axios.post(
+            'https://seekreap-tier-5-orchestrator.onrender.com/task',
+            payload,
+            { timeout: 10000 } // 10 seconds timeout
         );
 
-        if (!response.data || !response.data.success) {
-            throw new Error("Tier-5 returned invalid response");
-        }
+        // Tier-5 result
+        const result = response.data.result;
 
-        console.log("Tier-5 Decision:", response.data.result);
+        // Log locally in Tier-4
+        logTier4Decision({
+            taskId: uuidv4(),
+            creatorId,
+            videoUrl,
+            title,
+            usesThirdPartyMusic,
+            tier5Result: result
+        });
 
-        return {
-            success: true,
-            tier5: response.data.result
-        };
+        console.log(`Processed video for creator ${creatorId}:`, result);
+        return result;
 
     } catch (error) {
-
-        console.error("Tier-5 integration error:", 
-            error.response?.data || error.message
-        );
-
-        return {
-            success: false,
-            error: "Tier-5 processing failed"
-        };
+        console.error(`Error processing video for creator ${creatorId}:`, error.message);
+        return { error: 'Processing failed' };
     }
 }
 
-module.exports = processVideo;
+module.exports = { processVideo };
