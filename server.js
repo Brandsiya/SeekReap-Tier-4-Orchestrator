@@ -1,5 +1,5 @@
 const express = require('express');
-const { processVideo } = require('./processVideos');
+const { processVideo } = require('./pipelines/processVideos');
 
 const app = express();
 app.use(express.json());
