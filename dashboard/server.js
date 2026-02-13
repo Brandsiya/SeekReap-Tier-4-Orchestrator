@@ -1,21 +1,41 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const { processVideo } = require('../pipelines/processVideos');
+const express = require("express");
+const processVideo = require("../pipelines/processVideos");
 
 const app = express();
-app.use(bodyParser.json());
+app.use(express.json());
 
-app.post('/upload', async (req, res) => {
-  const { videoUrl, title, usesThirdPartyMusic } = req.body;
-  if (!videoUrl || !title) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
+app.post("/upload", async (req, res) => {
+    try {
+        const { videoUrl, title, usesThirdPartyMusic } = req.body;
 
-  const decision = await processVideo(videoUrl, { title, usesThirdPartyMusic });
-  if (!decision) return res.status(500).json({ error: 'Processing failed' });
+        if (!videoUrl) {
+            return res.status(400).json({ error: "Missing videoUrl" });
+        }
 
-  res.json({ status: 'success', finalDecision: decision });
+        const metadata = {
+            title,
+            usesThirdPartyMusic
+        };
+
+        const result = await processVideo(videoUrl, metadata);
+
+        if (!result.success) {
+            return res.status(500).json({ error: result.error });
+        }
+
+        return res.json({
+            success: true,
+            decision: result.tier5.finalDecision,
+            details: result.tier5
+        });
+
+    } catch (err) {
+        console.error("Upload route error:", err.message);
+        return res.status(500).json({ error: "Internal processing error" });
+    }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Tier-4 API running on port ${PORT}`));
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+    console.log(`Tier-4 API running on port ${PORT}`);
+});
