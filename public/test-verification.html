@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Verification</title>
+    <style>
+        body { font-family: Arial; padding: 20px; max-width: 600px; margin: 0 auto; }
+        input, button, select { padding: 10px; margin: 10px 0; width: 100%; }
+        .result { background: #f0f0f0; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { background: #e1f5fe; padding: 10px; border-radius: 5px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Test Verification</h1>
+    <p>This is a simple test page to verify the API connection</p>
+    
+    <div class="info">
+        <strong>Correct endpoint:</strong> /process-video<br>
+        <strong>Correct format:</strong> { creatorId, videoUrl, title, usesThirdPartyMusic }
+    </div>
+    
+    <div>
+        <label>Facebook Video ID:</label>
+        <input type="text" id="videoId" placeholder="123456789012345" value="123456789012345">
+        <small>Enter just the numeric ID</small>
+    </div>
+    
+    <div>
+        <label>Creator ID (auto-generated if empty):</label>
+        <input type="text" id="creatorId" placeholder="user_123456" value="user_123456">
+    </div>
+    
+    <div>
+        <label>Title (auto-generated if empty):</label>
+        <input type="text" id="title" placeholder="My Video" value="Test Video">
+    </div>
+    
+    <div>
+        <label>
+            <input type="checkbox" id="music"> Uses Third Party Music
+        </label>
+    </div>
+    
+    <button id="verifyBtn">Verify Video</button>
+    
+    <div class="result" id="result" style="display: none;"></div>
+
+    <script>
+        const API_URL = 'https://seekreap-tier-4-orchestrator.onrender.com';
+        
+        document.getElementById('verifyBtn').addEventListener('click', async () => {
+            const videoId = document.getElementById('videoId').value.trim();
+            let creatorId = document.getElementById('creatorId').value.trim();
+            let title = document.getElementById('title').value.trim();
+            const usesThirdPartyMusic = document.getElementById('music').checked;
+            
+            const resultDiv = document.getElementById('result');
+            
+            if (!videoId) {
+                alert('Please enter a video ID');
+                return;
+            }
+            
+            // Auto-generate if empty
+            if (!creatorId) {
+                creatorId = 'user_' + Date.now().toString().slice(-6);
+            }
+            
+            if (!title) {
+                title = 'Video ' + videoId;
+            }
+            
+            const requestBody = {
+                creatorId: creatorId,
+                videoUrl: 'https://facebook.com/watch/?v=' + videoId,
+                title: title,
+                usesThirdPartyMusic: usesThirdPartyMusic
+            };
+            
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = 'Calling API...';
+            resultDiv.className = 'result';
+            
+            try {
+                console.log('Calling API with:', requestBody);
+                
+                const response = await fetch(API_URL + '/process-video', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                const responseText = await response.text();
+                console.log('Response status:', response.status);
+                console.log('Response text:', responseText);
+                
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                    resultDiv.innerHTML = '<strong class="success">✅ API Call Successful!</strong><br><pre>' + 
+                        JSON.stringify(data, null, 2) + '</pre>';
+                    resultDiv.className = 'result success';
+                } catch (e) {
+                    resultDiv.innerHTML = '<strong class="error">❌ API Error</strong><br>' + responseText;
+                    resultDiv.className = 'result error';
+                }
+                
+            } catch (error) {
+                console.error('Error:', error);
+                resultDiv.innerHTML = '<strong class="error">❌ Verification Failed</strong><br>' + error.message;
+                resultDiv.className = 'result error';
+            }
+        });
+    </script>
+</body>
+</html>

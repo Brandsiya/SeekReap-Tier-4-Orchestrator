@@ -189,3 +189,15 @@ videoQueue.process(10, async (job) => {
 app.listen(PORT, () => {
   console.log(`SeekReap Tier-4 running on port ${PORT}`);
 });
+
+// =========================
+// Serve static files from public directory
+// =========================
+const path = require('path');
+app.use(express.static(path.join(__dirname, 'public')));
+
+// =========================
+// Serve static files from public directory
+// =========================
+const path = require('path');
+app.use(express.static(path.join(__dirname, 'public')));
