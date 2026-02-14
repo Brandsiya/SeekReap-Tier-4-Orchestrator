@@ -7,7 +7,6 @@ const Joi = require('joi');
 const { Pool } = require('pg');
 const Queue = require('bull');
 const crypto = require('crypto');
-const PDFDocument = require('pdfkit');
 
 const app = express();
 const PORT = process.env.PORT;
@@ -28,7 +27,11 @@ if (!PORT || !DATABASE_URL || !REDIS_URL) {
 app.use(helmet());
 app.use(morgan('combined'));
 app.use(express.json());
-app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }));
+
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100
+}));
 
 // =========================
 // PostgreSQL Connection
@@ -38,9 +41,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// =========================
-// Auto-create / update table
-// =========================
+// Auto-create table
 (async () => {
   try {
     await pool.query(`
@@ -65,9 +66,56 @@ const pool = new Pool({
 // =========================
 // Redis Queue
 // =========================
-const videoQueue = new Queue('video-processing', REDIS_URL, {
-  defaultJobOptions: { removeOnComplete: true, removeOnFail: true },
-  limiter: { max: 50, duration: 1000 } // Max 50 jobs per second
+const videoQueue = new Queue('video-processing', REDIS_URL);
+
+videoQueue.process(10, async (job) => {
+  const { videoId, creatorId, title, usesThirdPartyMusic } = job.data;
+  const processedAt = new Date().toISOString();
+
+  // Flags generation
+  const flags = [];
+  if (usesThirdPartyMusic) flags.push('third_party_music');
+  if (title.toLowerCase().includes('explicit')) flags.push('explicit_content');
+  if (title.length < 5) flags.push('short_title');
+
+  // Flag weights
+  const weights = {
+    third_party_music: 5,
+    explicit_content: 4,
+    short_title: 1,
+    copyright_claim: 5,
+    spam_keywords: 2,
+    sensitive_topic: 3
+  };
+
+  // Compute risk score
+  const risk_score = flags.reduce((acc, f) => acc + (weights[f] || 0), 0);
+  const severity = risk_score >= 7 ? 'high' : (risk_score >= 3 ? 'medium' : 'low');
+
+  // Evidence JSON
+  const evidence = {
+    videoId,
+    creatorId,
+    title,
+    status: 'processed',
+    usesThirdPartyMusic,
+    created_at: processedAt,
+    processed_at: processedAt,
+    flags,
+    risk_score,
+    severity
+  };
+
+  // Hash for tamper-proof
+  const hash = crypto.createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
+
+  // Update database
+  await pool.query(
+    `UPDATE videos SET status='processed', processed_at=$1, evidence_json=$2, hash=$3 WHERE id=$4`,
+    [processedAt, evidence, hash, videoId]
+  );
+
+  console.log(`Processed ${videoId} | Flags: [${flags.join(', ')}] | Risk: ${risk_score} (${severity})`);
 });
 
 // =========================
@@ -83,17 +131,21 @@ const videoSchema = Joi.object({
 // =========================
 // Routes
 // =========================
+
+// Serve Portal
 app.use('/', express.static(path.join(__dirname, 'SeekReap-Verif-Portal')));
 
+// Health
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
     res.json({ status: "ok", uptime: process.uptime() });
-  } catch {
+  } catch (err) {
     res.status(500).json({ status: "db_error" });
   }
 });
 
+// Process Video
 app.post('/process-video', async (req, res) => {
   try {
     const { error, value } = videoSchema.validate(req.body);
@@ -107,16 +159,17 @@ app.post('/process-video', async (req, res) => {
       [videoId, value.creatorId, value.title, 'queued', value.usesThirdPartyMusic]
     );
 
-    // Add video to queue
     await videoQueue.add({ videoId, creatorId: value.creatorId, title: value.title, usesThirdPartyMusic: value.usesThirdPartyMusic });
 
     res.json({ status: "queued", videoId });
+
   } catch (err) {
     console.error("Process error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
+// List Videos
 app.get('/videos', async (req, res) => {
   try {
     const result = await pool.query(`SELECT * FROM videos ORDER BY created_at DESC`);
@@ -127,60 +180,9 @@ app.get('/videos', async (req, res) => {
   }
 });
 
-app.get('/evidence/:videoId/download', async (req, res) => {
-  try {
-    const { videoId } = req.params;
-    const { format } = req.query;
-    const result = await pool.query(`SELECT * FROM videos WHERE id=$1`, [videoId]);
-    if (!result.rows.length) return res.status(404).json({ error: "Video not found" });
-    const video = result.rows[0];
-
-    if (format === 'pdf') {
-      const doc = new PDFDocument();
-      res.setHeader('Content-Disposition', `attachment; filename=${videoId}.pdf`);
-      res.setHeader('Content-Type', 'application/pdf');
-      doc.text(JSON.stringify(video.evidence_json, null, 2));
-      doc.text(`Hash: ${video.hash}`);
-      doc.end();
-      doc.pipe(res);
-    } else {
-      res.json(video.evidence_json);
-    }
-  } catch (err) {
-    console.error("Evidence download error:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+// =========================
+// Start
+// =========================
+app.listen(PORT, () => {
+  console.log(`SeekReap Tier-4 running on port ${PORT}`);
 });
-
-// =========================
-// Queue Processor (Batch + Flags)
-// =========================
-videoQueue.process(10, async (job) => { // 10 concurrent jobs
-  const { videoId, creatorId, title, usesThirdPartyMusic } = job.data;
-  const processedAt = new Date().toISOString();
-
-  // Flags generation
-  const flags = [];
-  if (usesThirdPartyMusic) flags.push('third_party_music');
-  if (title.toLowerCase().includes('explicit')) flags.push('explicit_content');
-  if (title.length < 5) flags.push('short_title');
-
-  // Evidence JSON
-  const evidence = { videoId, creatorId, title, status: 'processed', usesThirdPartyMusic, created_at: processedAt, processed_at: processedAt, flags };
-
-  // Hash for tamper-proof
-  const hash = crypto.createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
-
-  // Update database
-  await pool.query(
-    `UPDATE videos SET status='processed', processed_at=$1, evidence_json=$2, hash=$3 WHERE id=$4`,
-    [processedAt, evidence, hash, videoId]
-  );
-
-  console.log(`Processed ${videoId} with flags [${flags.join(', ')}]`);
-});
-
-// =========================
-// Start Server
-// =========================
-app.listen(PORT, () => console.log(`SeekReap Tier-4 running on port ${PORT}`));
