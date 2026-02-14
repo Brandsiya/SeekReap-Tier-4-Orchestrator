@@ -2484,5 +2484,84 @@
     }, 500));
     </script>
     
+<script>
+// ===== Sidebar Menu =====
+const sideMenu = document.getElementById('side-menu');
+const overlay = document.getElementById('overlay');
+const mobileMenuOpen = document.getElementById('mobile-menu-open');
+const desktopMenuOpen = document.getElementById('desktop-menu-open');
+const menuClose = document.getElementById('menu-close');
+
+function openMenu() {
+    sideMenu.classList.add('active');
+    overlay.classList.add('active');
+    document.body.classList.add('menu-open');
+}
+
+function closeMenu() {
+    sideMenu.classList.remove('active');
+    overlay.classList.remove('active');
+    document.body.classList.remove('menu-open');
+}
+
+mobileMenuOpen?.addEventListener('click', openMenu);
+desktopMenuOpen?.addEventListener('click', openMenu);
+menuClose?.addEventListener('click', closeMenu);
+overlay?.addEventListener('click', closeMenu);
+
+// ===== More Menu Dropdown =====
+const moreMenuBtn = document.getElementById('more-menu-btn');
+const moreMenuDropdown = document.getElementById('more-menu-dropdown');
+
+moreMenuBtn?.addEventListener('click', () => {
+    moreMenuDropdown.classList.toggle('active');
+});
+
+document.addEventListener('click', (e) => {
+    if (!moreMenuDropdown.contains(e.target) && !moreMenuBtn.contains(e.target)) {
+        moreMenuDropdown.classList.remove('active');
+    }
+});
+
+// ===== Share Button =====
+const shareTrigger = document.getElementById('share-trigger');
+shareTrigger?.addEventListener('click', async () => {
+    const shareData = { title: 'SeekReap Verification', text: 'Check out SeekReap to restore your social media monetization!', url: window.location.href };
+    try { if (navigator.share) { await navigator.share(shareData); } else { alert('Sharing is not supported in this browser. Copy the URL instead.'); } } catch (err) { console.error(Error
+<style>
+background: white;
+padding: 2rem;
+border-radius: 12px;
+box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+text-align: center;
+font-weight: 600;
+color: var(--dark);
+</style>
+<script>
+// ===== Sidebar Menu =====
+const sideMenu = document.getElementById('side-menu');
+const overlay = document.getElementById('overlay');
+const mobileMenuOpen = document.getElementById('mobile-menu-open');
+const desktopMenuOpen = document.getElementById('desktop-menu-open');
+const menuClose = document.getElementById('menu-close');
+
+function openMenu() { sideMenu.classList.add('active'); overlay.classList.add('active'); document.body.classList.add('menu-open'); }
+function closeMenu() { sideMenu.classList.remove('active'); overlay.classList.remove('active'); document.body.classList.remove('menu-open'); }
+mobileMenuOpen?.addEventListener('click', openMenu);
+desktopMenuOpen?.addEventListener('click', openMenu);
+menuClose?.addEventListener('click', closeMenu);
+overlay?.addEventListener('click', closeMenu);
+
+const moreMenuBtn = document.getElementById('more-menu-btn');
+const moreMenuDropdown = document.getElementById('more-menu-dropdown');
+moreMenuBtn?.addEventListener('click', () => { moreMenuDropdown.classList.toggle('active'); });
+document.addEventListener('click', (e) => { if (!moreMenuDropdown.contains(e.target) && !moreMenuBtn.contains(e.target)) { moreMenuDropdown.classList.remove('active'); }});
+
+const shareTrigger = document.getElementById('share-trigger');
+shareTrigger?.addEventListener('click', async () => { try { if (navigator.share) { await navigator.share({ title: 'SeekReap Verification', text: 'Check out SeekReap!', url: window.location.href }); } else { alert('Sharing not supported. Copy the URL instead.'); } } catch(e) { console.error(e); } });
+
+function selectTier(tier) { document.getElementById('tierSelect').value = tier; }
+async function verifyVideo() { const videoId = document.getElementById('videoInput').value.trim(); const tier = document.getElementById('tierSelect').value; if (!videoId) { alert('Please enter a valid Facebook Video ID.'); return; } document.getElementById('loadingOverlay').classList.add('active'); try { const res = await fetch('/process-video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId, tier }) }); const data = await res.json(); alert(`Verification queued! Video ID: ${data.videoId}`); } catch(err) { console.error(err); alert('Error verifying video.'); } finally { document.getElementById('loadingOverlay').classList.remove('active'); } }
+</script>
 </body>
 </html>
