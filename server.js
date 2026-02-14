@@ -35,7 +35,7 @@ app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }));
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
 // =========================
-// Auto-create tables
+// Auto-upgrade table for Evidence Layer
 // =========================
 (async () => {
   try {
@@ -53,7 +53,7 @@ const pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorize
         result_hash TEXT
       );
     `);
-    console.log("Videos table ready.");
+    console.log("Videos table ready/upgraded.");
   } catch (err) { console.error("Table creation failed:", err); }
 })();
 
@@ -97,45 +97,21 @@ const videoSchema = Joi.object({
 // Routes
 // =========================
 app.use('/', express.static(path.join(__dirname, 'SeekReap-Verif-Portal')));
-
-app.get('/health', async (req, res) => {
-  try { await pool.query('SELECT 1'); res.json({ status: "ok", uptime: process.uptime() }); }
-  catch(err){ res.status(500).json({ status: "db_error" }); }
+app.get('/health', async (req,res)=>{try{await pool.query('SELECT 1');res.json({status:"ok",uptime:process.uptime()});}catch(err){res.status(500).json({status:"db_error"})}});
+app.post('/process-video', async (req,res)=>{
+  try{
+    const {error,value}=videoSchema.validate(req.body);
+    if(error) return res.status(400).json({error:error.details[0].message});
+    const videoId=`vid_${Date.now()}`;
+    await pool.query(`INSERT INTO videos (id,creator_id,title,status,uses_third_party_music,created_at) VALUES ($1,$2,$3,$4,$5,NOW())`,[videoId,value.creatorId,value.title,'queued',value.usesThirdPartyMusic]);
+    await videoQueue.add({videoId});
+    res.json({status:"queued",videoId});
+  }catch(err){console.error(err);res.status(500).json({error:"Internal server error"})}
 });
-
-app.post('/process-video', async (req,res) => {
-  try {
-    const { error, value } = videoSchema.validate(req.body);
-    if(error) return res.status(400).json({ error: error.details[0].message });
-
-    const videoId = `vid_${Date.now()}`;
-    await pool.query(
-      `INSERT INTO videos (id, creator_id, title, status, uses_third_party_music, created_at)
-       VALUES ($1,$2,$3,$4,$5,NOW())`,
-      [videoId, value.creatorId, value.title, 'queued', value.usesThirdPartyMusic]
-    );
-    await videoQueue.add({ videoId });
-    res.json({ status: "queued", videoId });
-  } catch(err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
-});
-
-app.get('/videos', async (req,res) => {
-  try {
-    const result = await pool.query(`SELECT * FROM videos ORDER BY created_at DESC`);
-    res.json(result.rows);
-  } catch(err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
-});
-
-app.get('/evidence/:videoId', async (req,res) => {
-  try {
-    const { videoId } = req.params;
-    const result = await pool.query(`SELECT id, creator_id, processed_at, engine_version, analysis, result_hash FROM videos WHERE id=$1`, [videoId]);
-    if(result.rows.length===0) return res.status(404).json({ error: "Video not found" });
-    res.json({ ...result.rows[0], certification: "SeekReap Pre-Monetization Scan Complete" });
-  } catch(err){ console.error(err); res.status(500).json({ error: "Internal server error" }); }
-});
+app.get('/videos', async (req,res)=>{try{const result=await pool.query(`SELECT * FROM videos ORDER BY created_at DESC`);res.json(result.rows);}catch(err){console.error(err);res.status(500).json({error:"Internal server error"})}});
+app.get('/evidence/:videoId', async (req,res)=>{try{const {videoId}=req.params;const result=await pool.query(`SELECT id,creator_id,processed_at,engine_version,analysis,result_hash FROM videos WHERE id=$1`,[videoId]);if(result.rows.length===0) return res.status(404).json({error:"Video not found"});res.json({...result.rows[0],certification:"SeekReap Pre-Monetization Scan Complete"});}catch(err){console.error(err);res.status(500).json({error:"Internal server error"})}});
 
 // =========================
 // Start Server
 // =========================
-app.listen(PORT, () => console.log(`SeekReap Tier-4 running on port ${PORT}`));
+app.listen(PORT,()=>console.log(`SeekReap Tier-4 running on port ${PORT}`));
