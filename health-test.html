@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Health Test</title>
+</head>
+<body>
+    <h1>Health Test</h1>
+    <div id="status">Testing...</div>
+    <button onclick="testHealth()">Test Health</button>
+    <button onclick="testRoot()">Test Root</button>
+    <button onclick="testProcess()">Test Process Video</button>
+    <pre id="result" style="background:#f0f0f0;padding:10px;margin-top:20px;"></pre>
+
+    <script>
+        const BASE_URL = 'https://seekreap-tier-4-orchestrator.onrender.com';
+        
+        async function testHealth() {
+            const resultEl = document.getElementById('result');
+            resultEl.textContent = 'Testing...';
+            
+            try {
+                const response = await fetch(BASE_URL + '/health');
+                const text = await response.text();
+                resultEl.textContent = `Status: ${response.status}\n\n${text}`;
+            } catch (error) {
+                resultEl.textContent = 'Error: ' + error.message;
+            }
+        }
+        
+        async function testRoot() {
+            const resultEl = document.getElementById('result');
+            resultEl.textContent = 'Testing...';
+            
+            try {
+                const response = await fetch(BASE_URL);
+                const text = await response.text();
+                resultEl.textContent = `Status: ${response.status}\n\n${text.substring(0, 500)}...`;
+            } catch (error) {
+                resultEl.textContent = 'Error: ' + error.message;
+            }
+        }
+        
+        async function testProcess() {
+            const resultEl = document.getElementById('result');
+            resultEl.textContent = 'Testing...';
+            
+            try {
+                const payload = {
+                    creatorId: 'user_123456',
+                    videoUrl: 'https://facebook.com/watch/?v=123456789012345',
+                    title: 'Test Video',
+                    usesThirdPartyMusic: false
+                };
+                
+                const response = await fetch(BASE_URL + '/process-video', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                const text = await response.text();
+                resultEl.textContent = `Status: ${response.status}\n\n${text}`;
+            } catch (error) {
+                resultEl.textContent = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>
