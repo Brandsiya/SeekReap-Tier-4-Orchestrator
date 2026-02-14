@@ -14,33 +14,21 @@ const PORT = process.env.PORT;
 const DATABASE_URL = process.env.DATABASE_URL;
 const REDIS_URL = process.env.REDIS_URL;
 
-// =========================
-// Env validation
-// =========================
 if (!PORT || !DATABASE_URL || !REDIS_URL) {
   console.error("Missing required environment variables.");
   process.exit(1);
 }
 
-// =========================
-// Security & Middleware
-// =========================
 app.use(helmet());
 app.use(morgan('combined'));
 app.use(express.json());
 app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }));
 
-// =========================
-// PostgreSQL Connection
-// =========================
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
-// =========================
-// Auto-create / update table
-// =========================
 (async () => {
   try {
     await pool.query(`
@@ -62,17 +50,11 @@ const pool = new Pool({
   }
 })();
 
-// =========================
-// Redis Queue
-// =========================
 const videoQueue = new Queue('video-processing', REDIS_URL, {
   defaultJobOptions: { removeOnComplete: true, removeOnFail: true },
   limiter: { max: 50, duration: 1000 }
 });
 
-// =========================
-// Validation Schema
-// =========================
 const videoSchema = Joi.object({
   creatorId: Joi.string().required(),
   videoUrl: Joi.string().uri().required(),
@@ -81,9 +63,17 @@ const videoSchema = Joi.object({
 });
 
 // =========================
-// Routes
+// Serve standalone index.html at root
 // =========================
+app.use(express.static(path.join(__dirname)));
 
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// =========================
+// Other routes
+// =========================
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
@@ -151,9 +141,6 @@ app.get('/evidence/:videoId/download', async (req, res) => {
   }
 });
 
-// =========================
-// Queue Processor (Evidence + Flags)
-// =========================
 videoQueue.process(10, async (job) => {
   const { videoId, creatorId, title, usesThirdPartyMusic } = job.data;
   const processedAt = new Date().toISOString();
@@ -174,7 +161,4 @@ videoQueue.process(10, async (job) => {
   console.log(`Processed ${videoId} with flags: [${flags.join(', ')}] and hash ${hash}`);
 });
 
-// =========================
-// Start Server
-// =========================
 app.listen(PORT, () => console.log(`SeekReap Tier-4 running on port ${PORT}`));
