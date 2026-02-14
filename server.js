@@ -7,7 +7,6 @@ const Joi = require('joi');
 const { Pool } = require('pg');
 const Queue = require('bull');
 const crypto = require('crypto');
-const fs = require('fs');
 const PDFDocument = require('pdfkit');
 
 const app = express();
@@ -81,11 +80,8 @@ const videoSchema = Joi.object({
 // =========================
 // Routes
 // =========================
-
-// Serve portal
 app.use('/', express.static(path.join(__dirname, 'SeekReap-Verif-Portal')));
 
-// Health
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
@@ -95,7 +91,6 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Process Video
 app.post('/process-video', async (req, res) => {
   try {
     const { error, value } = videoSchema.validate(req.body);
@@ -118,7 +113,6 @@ app.post('/process-video', async (req, res) => {
   }
 });
 
-// List Videos
 app.get('/videos', async (req, res) => {
   try {
     const result = await pool.query(`SELECT * FROM videos ORDER BY created_at DESC`);
@@ -129,16 +123,15 @@ app.get('/videos', async (req, res) => {
   }
 });
 
-// Evidence Download
+// Evidence download
 app.get('/evidence/:videoId/download', async (req, res) => {
   try {
     const { videoId } = req.params;
     const { format } = req.query;
-
     const result = await pool.query(`SELECT * FROM videos WHERE id=$1`, [videoId]);
-    if (result.rows.length === 0) return res.status(404).json({ error: "Video not found" });
-
+    if (!result.rows.length) return res.status(404).json({ error: "Video not found" });
     const video = result.rows[0];
+
     if (format === 'pdf') {
       const doc = new PDFDocument();
       res.setHeader('Content-Disposition', `attachment; filename=${videoId}.pdf`);
@@ -157,20 +150,19 @@ app.get('/evidence/:videoId/download', async (req, res) => {
 });
 
 // =========================
-// Queue Processor (Evidence Layer)
+// Queue Processor (Evidence + Pre-scan Flags)
 // =========================
 videoQueue.process(async (job) => {
   const { videoId, creatorId, title, usesThirdPartyMusic } = job.data;
   const processedAt = new Date().toISOString();
 
-  const evidence = {
-    videoId, creatorId, title,
-    status: 'processed',
-    usesThirdPartyMusic,
-    created_at: processedAt,
-    processed_at: processedAt,
-    flags: [] // can populate in future
-  };
+  // Simple demonetization flag simulation
+  const flags = [];
+  if (usesThirdPartyMusic) flags.push('third_party_music');
+  if (title.toLowerCase().includes('explicit')) flags.push('explicit_content');
+  if (title.length < 5) flags.push('short_title');
+
+  const evidence = { videoId, creatorId, title, status: 'processed', usesThirdPartyMusic, created_at: processedAt, processed_at: processedAt, flags };
 
   const hash = crypto.createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
 
@@ -179,7 +171,7 @@ videoQueue.process(async (job) => {
     [processedAt, evidence, hash, videoId]
   );
 
-  console.log(`Processed ${videoId} with hash ${hash}`);
+  console.log(`Processed ${videoId} with flags: [${flags.join(', ')}] and hash ${hash}`);
 });
 
 // =========================
