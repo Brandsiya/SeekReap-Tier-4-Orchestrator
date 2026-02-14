@@ -1,40 +1,42 @@
+const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const PDFDocument = require('pdfkit');
 const { v4: uuidv4 } = require('uuid');
 
-const dbPath = path.join(__dirname, '../seekreap-tier4-db/videos.json');
-if (!fs.existsSync(dbPath)) fs.writeFileSync(dbPath, JSON.stringify({}));
+const TIER5_URL = 'https://seekreap-tier-5-orchestrator.onrender.com/task'; // Tier-5 Render URL
 
-async function processVideo({ creatorId, videoUrl, title, usesThirdPartyMusic }) {
-  try {
-    const db = JSON.parse(fs.readFileSync(dbPath));
-    const videoId = uuidv4();
+async function processVideo(videoData) {
+    try {
+        // Send metadata to Tier-5
+        const response = await axios.post(TIER5_URL, {
+            metadata: {
+                title: videoData.title,
+                usesThirdPartyMusic: videoData.usesThirdPartyMusic
+            }
+        });
 
-    const processed = {
-      id: videoId,
-      creatorId,
-      title,
-      url: videoUrl,
-      usesThirdPartyMusic,
-      status: 'processed',
-      timestamp: new Date().toISOString()
-    };
+        const result = response.data.result;
 
-    db[videoId] = processed;
-    fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
+        // Save a creator-proof JSON report
+        const report = {
+            reportId: uuidv4(),
+            creatorId: videoData.creatorId,
+            videoUrl: videoData.videoUrl,
+            timestamp: new Date().toISOString(),
+            tier5Result: result
+        };
 
-    const pdfPath = path.join(__dirname, `../seekreap-tier4-db/${videoId}.pdf`);
-    const doc = new PDFDocument();
-    doc.pipe(fs.createWriteStream(pdfPath));
-    doc.text(`Video Report\n\nID: ${videoId}\nCreator: ${creatorId}\nTitle: ${title}\nUses 3rd-party music: ${usesThirdPartyMusic}`);
-    doc.end();
+        const reportsDir = path.join(__dirname, 'reports');
+        if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir);
 
-    return processed;
-  } catch (err) {
-    console.error('Video processing error:', err);
-    throw err;
-  }
+        const reportPath = path.join(reportsDir, `${report.reportId}.json`);
+        fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+
+        return report; // This is the proof creators can submit
+    } catch (err) {
+        console.error('Error processing video:', err.message);
+        throw new Error('Processing failed');
+    }
 }
 
 module.exports = { processVideo };

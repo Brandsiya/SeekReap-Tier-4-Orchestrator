@@ -1,11 +1,43 @@
+# Node modules
+node_modules/
+
 # Python cache
 __pycache__/
 *.pyc
 
-# Virtual environments
-venv*/
-
-# Runtime logs/pids
+# Logs
+logs/
 *.log
-*.pid
-SeekReap-Tier-4-Orchestrator.BACKUP
+tier4.pid
+
+# Backups
+backups/
+*.backup
+*.bak
+*.old
+SeekReap-Tier-4-Orchestrator.BACKUP/
+
+# Environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Downloads and temp files
+download?format=pdf
+main
+
+# Reports (if generated)
+reports/*.json
+reports/*.pdf
+pipelines/reports/*.json
+pipelines/reports/*.pdf
+
+# Database (if local)
+seekreap-tier4-db/*.db
