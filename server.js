@@ -83,7 +83,6 @@ const videoSchema = Joi.object({
 // =========================
 // Routes
 // =========================
-app.use('/', express.static(path.join(__dirname, 'SeekReap-Verif-Portal')));
 
 app.get('/health', async (req, res) => {
   try {
