@@ -2175,9 +2175,9 @@ async function verifyVideo() {
     try {
         // Call the REAL backend API on Render
         const API_URL = 'https://seekreap-tier-4-orchestrator.onrender.com';
-        console.log('Calling API:', API_URL + '/api/verify');
+        console.log('Calling API:', API_URL + '/process-video');
         
-        const response = await fetch(`${API_URL}/api/verify`, {
+        const response = await fetch(`${API_URL}/process-video`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
