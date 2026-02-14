@@ -15,7 +15,7 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const REDIS_URL = process.env.REDIS_URL;
 
 // =========================
-// Env validation
+// Environment Validation
 // =========================
 if (!PORT || !DATABASE_URL || !REDIS_URL) {
   console.error("Missing required environment variables.");
@@ -65,7 +65,10 @@ const pool = new Pool({
 // =========================
 // Redis Queue
 // =========================
-const videoQueue = new Queue('video-processing', REDIS_URL);
+const videoQueue = new Queue('video-processing', REDIS_URL, {
+  defaultJobOptions: { removeOnComplete: true, removeOnFail: true },
+  limiter: { max: 50, duration: 1000 } // Max 50 jobs per second
+});
 
 // =========================
 // Validation Schema
@@ -104,6 +107,7 @@ app.post('/process-video', async (req, res) => {
       [videoId, value.creatorId, value.title, 'queued', value.usesThirdPartyMusic]
     );
 
+    // Add video to queue
     await videoQueue.add({ videoId, creatorId: value.creatorId, title: value.title, usesThirdPartyMusic: value.usesThirdPartyMusic });
 
     res.json({ status: "queued", videoId });
@@ -123,7 +127,6 @@ app.get('/videos', async (req, res) => {
   }
 });
 
-// Evidence download
 app.get('/evidence/:videoId/download', async (req, res) => {
   try {
     const { videoId } = req.params;
@@ -150,28 +153,31 @@ app.get('/evidence/:videoId/download', async (req, res) => {
 });
 
 // =========================
-// Queue Processor (Evidence + Pre-scan Flags)
+// Queue Processor (Batch + Flags)
 // =========================
-videoQueue.process(async (job) => {
+videoQueue.process(10, async (job) => { // 10 concurrent jobs
   const { videoId, creatorId, title, usesThirdPartyMusic } = job.data;
   const processedAt = new Date().toISOString();
 
-  // Simple demonetization flag simulation
+  // Flags generation
   const flags = [];
   if (usesThirdPartyMusic) flags.push('third_party_music');
   if (title.toLowerCase().includes('explicit')) flags.push('explicit_content');
   if (title.length < 5) flags.push('short_title');
 
+  // Evidence JSON
   const evidence = { videoId, creatorId, title, status: 'processed', usesThirdPartyMusic, created_at: processedAt, processed_at: processedAt, flags };
 
+  // Hash for tamper-proof
   const hash = crypto.createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
 
+  // Update database
   await pool.query(
     `UPDATE videos SET status='processed', processed_at=$1, evidence_json=$2, hash=$3 WHERE id=$4`,
     [processedAt, evidence, hash, videoId]
   );
 
-  console.log(`Processed ${videoId} with flags: [${flags.join(', ')}] and hash ${hash}`);
+  console.log(`Processed ${videoId} with flags [${flags.join(', ')}]`);
 });
 
 // =========================
