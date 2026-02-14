@@ -27,24 +27,55 @@ app.use(helmet());
 app.use(morgan('combined'));
 app.use(express.json());
 
-const limiter = rateLimit({
+app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
-});
-app.use(limiter);
+  max: 100
+}));
 
 // =========================
-// PostgreSQL Connection
+// PostgreSQL
 // =========================
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
+// Auto-create table
+(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS videos (
+        id TEXT PRIMARY KEY,
+        creator_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        uses_third_party_music BOOLEAN,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log("Videos table ready.");
+  } catch (err) {
+    console.error("Table creation failed:", err);
+  }
+})();
+
 // =========================
 // Redis Queue
 // =========================
 const videoQueue = new Queue('video-processing', REDIS_URL);
+
+videoQueue.process(async (job) => {
+  const { videoId } = job.data;
+
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
+  await pool.query(
+    `UPDATE videos SET status='processed' WHERE id=$1`,
+    [videoId]
+  );
+
+  console.log(`Processed ${videoId}`);
+});
 
 // =========================
 // Validation Schema
@@ -57,13 +88,13 @@ const videoSchema = Joi.object({
 });
 
 // =========================
-// Serve Portal
+// Routes
 // =========================
+
+// Serve Portal
 app.use('/', express.static(path.join(__dirname, 'SeekReap-Verif-Portal')));
 
-// =========================
-// Health Check
-// =========================
+// Health
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
@@ -73,55 +104,47 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// =========================
-// Process Video (Queue)
-// =========================
+// Process Video
 app.post('/process-video', async (req, res) => {
-  const { error, value } = videoSchema.validate(req.body);
-  if (error) {
-    return res.status(400).json({ error: error.details[0].message });
+  try {
+    const { error, value } = videoSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({ error: error.details[0].message });
+    }
+
+    const videoId = `vid_${Date.now()}`;
+
+    await pool.query(
+      `INSERT INTO videos (id, creator_id, title, status, uses_third_party_music, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [videoId, value.creatorId, value.title, 'queued', value.usesThirdPartyMusic]
+    );
+
+    await videoQueue.add({ videoId });
+
+    res.json({ status: "queued", videoId });
+
+  } catch (err) {
+    console.error("Process error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
-
-  const videoId = `vid_${Date.now()}`;
-
-  await pool.query(
-    `INSERT INTO videos (id, creator_id, title, status, uses_third_party_music, created_at)
-     VALUES ($1, $2, $3, $4, $5, NOW())`,
-    [videoId, value.creatorId, value.title, 'queued', value.usesThirdPartyMusic]
-  );
-
-  await videoQueue.add({ videoId });
-
-  res.json({ status: "queued", videoId });
 });
 
-// =========================
-// Queue Processor
-// =========================
-videoQueue.process(async (job) => {
-  const { videoId } = job.data;
-
-  // Simulated processing
-  await new Promise(resolve => setTimeout(resolve, 3000));
-
-  await pool.query(
-    `UPDATE videos SET status='processed' WHERE id=$1`,
-    [videoId]
-  );
-
-  console.log(`Processed ${videoId}`);
-});
-
-// =========================
 // List Videos
-// =========================
 app.get('/videos', async (req, res) => {
-  const result = await pool.query(`SELECT * FROM videos ORDER BY created_at DESC`);
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      `SELECT * FROM videos ORDER BY created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Fetch error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // =========================
-// Start Server
+// Start
 // =========================
 app.listen(PORT, () => {
   console.log(`SeekReap Tier-4 running on port ${PORT}`);
