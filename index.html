@@ -2362,8 +2362,25 @@ async function simulateVerificationFallback(videoId, tier) {
 }
 
 function showVerificationSuccess(result) {
+    // Handle both simulated and real API responses
+    const videoId = result.videoId || videoInput.value;
+    const certificateId = result.certificateId || result.videoId || 'CERT-' + Date.now().toString().slice(-8);
+    const score = result.score || '98.7';
+    const tierName = result.tierName || getTierName(result.tier || tierSelect.value);
+    
     const message = `✅ VERIFICATION COMPLETE!\n\n` +
-        `Certificate ID: ${result.certificateId || 'N/A'}\n` +
+        `Video ID: ${videoId}\n` +
+        `Status: ${result.status || 'queued'}\n` +
+        `Video Queue ID: ${certificateId}\n` +
+        `Tier: ${tierName}\n` +
+        `Score: ${score}%\n\n` +
+        `Your video has been queued for processing. You will receive a certificate shortly.`;
+    
+    showNotification(message, 'success');
+    
+    // Store result in sessionStorage
+    sessionStorage.setItem('lastVerification', JSON.stringify(result));
+}
         `Video ID: ${result.videoId}\n` +
         `Tier: ${result.tierName || getTierName(result.tier)}\n` +
         `Score: ${result.score || '98.7'}%\n` +

@@ -536,9 +536,9 @@
 
             try {
                 // Call the actual backend API
-                console.log('Calling API:', `${API_BASE_URL}/api/verify`);
+                console.log('Calling API:', `${API_BASE_URL}/process-video`);
                 
-                const response = await fetch(`${API_BASE_URL}/api/verify`, {
+                const response = await fetch(`${API_BASE_URL}/process-video`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -588,7 +588,7 @@
             resultSubtitle.textContent = 'Your video has been successfully verified by the 15-node quorum';
 
             // Build details HTML
-            const certificateId = result.certificateId || `CERT-${Date.now().toString().slice(-8)}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+            const certificateId = result.videoId || result.certificateId || `CERT-${Date.now().toString().slice(-8)}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
             const score = result.score || (0.85 + Math.random() * 0.15).toFixed(2);
             const timestamp = new Date().toLocaleString();
 
