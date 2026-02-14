@@ -13,19 +13,25 @@ const PORT = process.env.PORT || 10000;
 const DATABASE_URL = process.env.DATABASE_URL;
 const REDIS_URL = process.env.REDIS_URL;
 
+// =========================
 // Security & Middleware
+// =========================
 app.use(helmet());
 app.use(morgan('combined'));
 app.use(express.json());
 app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }));
 
+// =========================
 // PostgreSQL Connection
+// =========================
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
+// =========================
 // Auto-create / update table
+// =========================
 (async () => {
   try {
     await pool.query(`
@@ -47,19 +53,116 @@ const pool = new Pool({
   }
 })();
 
+// =========================
 // Redis Queue
+// =========================
 const videoQueue = new Queue('video-processing', REDIS_URL, {
   defaultJobOptions: { removeOnComplete: true, removeOnFail: true },
   limiter: { max: 50, duration: 1000 }
 });
 
-// Serve standalone index.html as landing page
+// =========================
+// Serve your standalone index.html at root
+// =========================
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Serve all other static files (terms.html, privacy.html, etc.)
+// =========================
+// Serve all other static files (CSS, JS, images, terms, privacy, etc.)
+// =========================
 app.use(express.static(__dirname));
 
+// =========================
+// Video processing API routes (Tier-4)
+// =========================
+app.post('/process-video', async (req, res) => {
+  try {
+    const { creatorId, videoUrl, title, usesThirdPartyMusic } = req.body;
+    const videoId = `vid_${Date.now()}`;
+    await pool.query(
+      `INSERT INTO videos (id, creator_id, title, status, uses_third_party_music, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [videoId, creatorId, title, 'queued', usesThirdPartyMusic]
+    );
+    await videoQueue.add({ videoId, creatorId, title, usesThirdPartyMusic });
+    res.json({ status: "queued", videoId });
+  } catch (err) {
+    console.error("Process error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.get('/videos', async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT * FROM videos ORDER BY created_at DESC`);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Fetch error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.get('/evidence/:videoId/download', async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    const { format } = req.query;
+    const result = await pool.query(`SELECT * FROM videos WHERE id=$1`, [videoId]);
+    if (!result.rows.length) return res.status(404).json({ error: "Video not found" });
+    const video = result.rows[0];
+
+    if (format === 'pdf') {
+      const doc = new PDFDocument();
+      res.setHeader('Content-Disposition', `attachment; filename=${videoId}.pdf`);
+      res.setHeader('Content-Type', 'application/pdf');
+      doc.text(JSON.stringify(video.evidence_json, null, 2));
+      doc.text(`Hash: ${video.hash}`);
+      doc.pipe(res);
+      doc.end();
+    } else {
+      res.json(video.evidence_json);
+    }
+  } catch (err) {
+    console.error("Evidence download error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// =========================
+// Queue Processor (Evidence + Flags)
+// =========================
+videoQueue.process(10, async (job) => {
+  const { videoId, creatorId, title, usesThirdPartyMusic } = job.data;
+  const processedAt = new Date().toISOString();
+  const flags = [];
+  if (usesThirdPartyMusic) flags.push('third_party_music');
+  if (title.toLowerCase().includes('explicit')) flags.push('explicit_content');
+  if (title.length < 5) flags.push('short_title');
+
+  const evidence = { videoId, creatorId, title, status: 'processed', usesThirdPartyMusic, created_at: processedAt, processed_at: processedAt, flags };
+  const hash = crypto.createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
+
+  await pool.query(
+    `UPDATE videos SET status='processed', processed_at=$1, evidence_json=$2, hash=$3 WHERE id=$4`,
+    [processedAt, evidence, hash, videoId]
+  );
+
+  console.log(`Processed ${videoId} with flags: [${flags.join(', ')}] and hash ${hash}`);
+});
+
+// =========================
+// Health check route
+// =========================
+app.get('/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: "ok", uptime: process.uptime() });
+  } catch {
+    res.status(500).json({ status: "db_error" });
+  }
+});
+
+// =========================
 // Start Server
+// =========================
 app.listen(PORT, () => console.log(`SeekReap Tier-4 running on port ${PORT}`));
