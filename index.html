@@ -1941,331 +1941,356 @@
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-spinner">Verifying...</div>
     </div>
-    
-    <script>
-    // ===== DOM ELEMENTS =====
-    const desktopMenuOpen = document.getElementById('desktop-menu-open');
-    const mobileMenuOpen = document.getElementById('mobile-menu-open');
-    const menuClose = document.getElementById('menu-close');
-    const sideMenu = document.getElementById('side-menu');
-    const overlay = document.getElementById('overlay');
-    const moreMenuBtn = document.getElementById('more-menu-btn');
-    const moreMenuDropdown = document.getElementById('more-menu-dropdown');
-    const shareTrigger = document.getElementById('share-trigger');
-    const verifyBtn = document.getElementById('verifyBtn');
-    const videoInput = document.getElementById('videoInput');
-    const tierSelect = document.getElementById('tierSelect');
-    const loadingOverlay = document.getElementById('loadingOverlay');
-    
-    // ===== STATE MANAGEMENT =====
-    const state = {
+
+<script type="text/javascript">
+// ===== DOM ELEMENTS =====
+let desktopMenuOpen, mobileMenuOpen, menuClose, sideMenu, overlay;
+let moreMenuBtn, moreMenuDropdown, shareTrigger, verifyBtn, videoInput, tierSelect, loadingOverlay;
+
+// ===== STATE MANAGEMENT =====
+const state = {
     isMenuOpen: false,
     isMoreMenuOpen: false,
     isMobile: window.innerWidth <= 820,
     isVerifying: false
-    };
+};
+
+// ===== INITIALIZATION =====
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize DOM elements
+    desktopMenuOpen = document.getElementById('desktop-menu-open');
+    mobileMenuOpen = document.getElementById('mobile-menu-open');
+    menuClose = document.getElementById('menu-close');
+    sideMenu = document.getElementById('side-menu');
+    overlay = document.getElementById('overlay');
+    moreMenuBtn = document.getElementById('more-menu-btn');
+    moreMenuDropdown = document.getElementById('more-menu-dropdown');
+    shareTrigger = document.getElementById('share-trigger');
+    verifyBtn = document.getElementById('verifyBtn');
+    videoInput = document.getElementById('videoInput');
+    tierSelect = document.getElementById('tierSelect');
+    loadingOverlay = document.getElementById('loadingOverlay');
     
-    // ===== INITIALIZATION =====
-    document.addEventListener('DOMContentLoaded', () => {
     initEventListeners();
     setupResponsiveBehavior();
     trackEvent('page', 'view', 'dashboard');
     console.log('SeekReap initialized');
-    });
-    
-    // ===== EVENT LISTENERS =====
-    function initEventListeners() {
+});
+
+// ===== EVENT LISTENERS =====
+function initEventListeners() {
     // Menu toggle events
     if (desktopMenuOpen) {
-    desktopMenuOpen.addEventListener('click', toggleMenu);
+        desktopMenuOpen.addEventListener('click', toggleMenu);
     }
     
     if (mobileMenuOpen) {
-    mobileMenuOpen.addEventListener('click', toggleMenu);
+        mobileMenuOpen.addEventListener('click', toggleMenu);
     }
     
     if (menuClose) {
-    menuClose.addEventListener('click', closeMenu);
+        menuClose.addEventListener('click', closeMenu);
     }
     
     if (overlay) {
-    overlay.addEventListener('click', closeMenu);
+        overlay.addEventListener('click', closeMenu);
     }
     
     // More menu events
     if (moreMenuBtn) {
-    moreMenuBtn.addEventListener('click', toggleMoreMenu);
+        moreMenuBtn.addEventListener('click', toggleMoreMenu);
     }
     
     // Share button event
     if (shareTrigger) {
-    shareTrigger.addEventListener('click', handleShare);
+        shareTrigger.addEventListener('click', handleShare);
     }
     
-    // Verification events
+    // Verification events - using only event listener (no onclick attribute)
     if (verifyBtn) {
-    verifyBtn.addEventListener('click', verifyVideo);
+        verifyBtn.addEventListener('click', function(e) {
+            e.preventDefault(); // Prevent any default behavior
+            verifyVideo();
+        });
     }
     
     if (videoInput) {
-    videoInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-    verifyVideo();
-    }
-    });
+        videoInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                verifyVideo();
+            }
+        });
     }
     
     // Close more menu on outside click
     document.addEventListener('click', (e) => {
-    if (moreMenuBtn && moreMenuDropdown && 
-    !moreMenuBtn.contains(e.target) && 
-    !moreMenuDropdown.contains(e.target)) {
-    closeMoreMenu();
-    }
+        if (moreMenuBtn && moreMenuDropdown && 
+            !moreMenuBtn.contains(e.target) && 
+            !moreMenuDropdown.contains(e.target)) {
+            closeMoreMenu();
+        }
     });
     
     // Escape key to close menus
     document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-    if (state.isMenuOpen) closeMenu();
-    if (state.isMoreMenuOpen) closeMoreMenu();
-    if (state.isVerifying) cancelVerification();
-    }
+        if (e.key === 'Escape') {
+            if (state.isMenuOpen) closeMenu();
+            if (state.isMoreMenuOpen) closeMoreMenu();
+            if (state.isVerifying) cancelVerification();
+        }
     });
     
     // Window resize
     window.addEventListener('resize', handleResize);
-    }
-    
-    // ===== MENU FUNCTIONS =====
-    function toggleMenu() {
+}
+
+// ===== MENU FUNCTIONS =====
+function toggleMenu() {
     state.isMenuOpen = !state.isMenuOpen;
     
     if (state.isMenuOpen) {
-    openMenu();
+        openMenu();
     } else {
-    closeMenu();
+        closeMenu();
     }
     
     trackEvent('navigation', state.isMenuOpen ? 'open_menu' : 'close_menu', state.isMobile ? 'mobile' : 'desktop');
-    }
-    
-    function openMenu() {
-    sideMenu.classList.add('active');
-    overlay.classList.add('active');
+}
+
+function openMenu() {
+    if (sideMenu) sideMenu.classList.add('active');
+    if (overlay) overlay.classList.add('active');
     state.isMenuOpen = true;
     
     // Prevent body scroll on mobile
-    const isMobile = window.innerWidth <= 820;
-    if (isMobile) {
-    document.body.classList.add('menu-open');
+    if (window.innerWidth <= 820) {
+        document.body.classList.add('menu-open');
     }
-    }
-    
-    function closeMenu() {
-    sideMenu.classList.remove('active');
-    overlay.classList.remove('active');
+}
+
+function closeMenu() {
+    if (sideMenu) sideMenu.classList.remove('active');
+    if (overlay) overlay.classList.remove('active');
     state.isMenuOpen = false;
     
     // Restore body scroll
     document.body.classList.remove('menu-open');
-    }
-    
-    // ===== MORE MENU FUNCTIONS =====
-    function toggleMoreMenu(e) {
+}
+
+// ===== MORE MENU FUNCTIONS =====
+function toggleMoreMenu(e) {
     e.stopPropagation();
     state.isMoreMenuOpen = !state.isMoreMenuOpen;
     
     if (state.isMoreMenuOpen) {
-    moreMenuDropdown.classList.add('active');
-    trackEvent('navigation', 'open_more_menu', 'desktop');
+        if (moreMenuDropdown) moreMenuDropdown.classList.add('active');
+        trackEvent('navigation', 'open_more_menu', 'desktop');
     } else {
-    moreMenuDropdown.classList.remove('active');
+        if (moreMenuDropdown) moreMenuDropdown.classList.remove('active');
     }
-    }
-    
-    function closeMoreMenu() {
-    moreMenuDropdown.classList.remove('active');
+}
+
+function closeMoreMenu() {
+    if (moreMenuDropdown) moreMenuDropdown.classList.remove('active');
     state.isMoreMenuOpen = false;
-    }
-    
-    // ===== SHARE FUNCTIONALITY =====
-    async function handleShare() {
+}
+
+// ===== SHARE FUNCTIONALITY =====
+async function handleShare() {
     const shareData = {
-    title: 'SeekReap - Content Verification',
-    text: 'Check out SeekReap for content verification and revenue restoration',
-    url: window.location.href
+        title: 'SeekReap - Content Verification',
+        text: 'Check out SeekReap for content verification and revenue restoration',
+        url: window.location.href
     };
     
     try {
-    if (navigator.share) {
-    await navigator.share(shareData);
-    showNotification('Content shared successfully!', 'success');
-    trackEvent('engagement', 'share', 'native_api');
-    } else {
-    // Fallback: Copy to clipboard
-    await navigator.clipboard.writeText(window.location.href);
-    showNotification('Link copied to clipboard!', 'success');
-    trackEvent('engagement', 'share', 'clipboard');
-    }
+        if (navigator.share) {
+            await navigator.share(shareData);
+            showNotification('Content shared successfully!', 'success');
+            trackEvent('engagement', 'share', 'native_api');
+        } else {
+            // Fallback: Copy to clipboard
+            await navigator.clipboard.writeText(window.location.href);
+            showNotification('Link copied to clipboard!', 'success');
+            trackEvent('engagement', 'share', 'clipboard');
+        }
     } catch (error) {
-    if (error.name !== 'AbortError') {
-    console.error('Error sharing:', error);
-    showNotification('Failed to share. Please try again.', 'error');
+        if (error.name !== 'AbortError') {
+            console.error('Error sharing:', error);
+            showNotification('Failed to share. Please try again.', 'error');
+        }
     }
-    }
+}
+
+// ===== VERIFICATION FUNCTIONS =====
+async function verifyVideo() {
+    // Guard clause to prevent multiple verifications
+    if (state.isVerifying) {
+        showNotification('Verification already in progress...', 'info');
+        return;
     }
     
-    // ===== VERIFICATION FUNCTIONS =====
-    async function verifyVideo() {
-    if (state.isVerifying) return;
+    // Check if elements exist
+    if (!videoInput || !tierSelect || !verifyBtn) {
+        console.error('Required elements not found');
+        showNotification('System error. Please refresh the page.', 'error');
+        return;
+    }
     
     const videoId = videoInput.value.trim();
     const tier = tierSelect.value;
     
     // Validation
     if (!videoId) {
-    showNotification('⚠️ Please enter a Facebook Video ID', 'warning');
-    videoInput.focus();
-    return;
+        showNotification('⚠️ Please enter a Facebook Video ID', 'warning');
+        videoInput.focus();
+        return;
     }
     
     if (videoId.length < 5) {
-    showNotification('⚠️ Video ID too short (minimum 5 characters)', 'warning');
-    return;
+        showNotification('⚠️ Video ID too short (minimum 5 characters)', 'warning');
+        videoInput.focus();
+        return;
     }
     
     state.isVerifying = true;
     
     // Show loading
     if (loadingOverlay) {
-    loadingOverlay.classList.add('active');
+        loadingOverlay.classList.add('active');
     }
     
-    verifyBtn.disabled = true;
-    verifyBtn.textContent = 'Verifying...';
+    if (verifyBtn) {
+        verifyBtn.disabled = true;
+        verifyBtn.textContent = 'Verifying...';
+    }
     
     try {
-    // Call actual API endpoint (simulated for now)
-    const result = await simulateVerification(videoId, tier);
-    
-    // Show success
-    showVerificationSuccess(result);
-    trackEvent('verification', 'success', tier);
-    
+        // Call actual API endpoint (simulated for now)
+        const result = await simulateVerification(videoId, tier);
+        
+        // Show success
+        showVerificationSuccess(result);
+        trackEvent('verification', 'success', tier);
+        
     } catch (error) {
-    console.error('Verification error:', error);
-    showNotification(`❌ Verification failed: ${error.message}`, 'error');
-    trackEvent('verification', 'failed', tier);
+        console.error('Verification error:', error);
+        showNotification(`❌ Verification failed: ${error.message || 'Please try again.'}`, 'error');
+        trackEvent('verification', 'failed', tier);
     } finally {
-    // Hide loading
-    if (loadingOverlay) {
-    loadingOverlay.classList.remove('active');
+        // Hide loading
+        if (loadingOverlay) {
+            loadingOverlay.classList.remove('active');
+        }
+        
+        if (verifyBtn) {
+            verifyBtn.disabled = false;
+            verifyBtn.textContent = '🚀 VERIFY NOW';
+        }
+        state.isVerifying = false;
     }
-    
-    verifyBtn.disabled = false;
-    verifyBtn.textContent = '🚀 VERIFY NOW';
-    state.isVerifying = false;
-    }
-    }
-    
-    async function simulateVerification(videoId, tier) {
+}
+
+async function simulateVerification(videoId, tier) {
     return new Promise((resolve, reject) => {
-    setTimeout(() => {
-    // Simulate API response
-    const success = Math.random() > 0.1; // 90% success rate
-    
-    if (success) {
-    const score = (0.85 + Math.random() * 0.15).toFixed(2);
-    const certificateId = `CERT-${Date.now().toString().slice(-6)}`;
-    
-    resolve({
-    videoId,
-    tier,
-    score,
-    certificateId,
-    success: true,
-    price: getTierPrice(tier),
-    tierName: getTierName(tier)
+        setTimeout(() => {
+            // Simulate API response - 90% success rate
+            const success = Math.random() > 0.1;
+            
+            if (success) {
+                const score = (0.85 + Math.random() * 0.15).toFixed(2);
+                const certificateId = `CERT-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+                
+                resolve({
+                    videoId,
+                    tier,
+                    score,
+                    certificateId,
+                    success: true,
+                    price: getTierPrice(tier),
+                    tierName: getTierName(tier)
+                });
+            } else {
+                reject(new Error('Verification service temporarily unavailable'));
+            }
+        }, 2000); // Simulate 2 second API call
     });
-    } else {
-    reject(new Error('Verification failed. Please try again.'));
-    }
-    }, 2000); // Simulate 2 second API call
-    });
-    }
-    
-    function showVerificationSuccess(result) {
+}
+
+function showVerificationSuccess(result) {
     const message = `✅ VERIFICATION COMPLETE!\n\n` +
-    `Certificate ID: ${result.certificateId}\n` +
-    `Video ID: ${result.videoId}\n` +
-    `Tier: ${result.tierName}\n` +
-    `Score: ${result.score}\n` +
-    `Status: VERIFIED\n\n` +
-    `Next: Pay ${result.price} to download certificate`;
+        `Certificate ID: ${result.certificateId}\n` +
+        `Video ID: ${result.videoId}\n` +
+        `Tier: ${result.tierName}\n` +
+        `Score: ${result.score}\n` +
+        `Status: VERIFIED\n\n` +
+        `Next: Pay ${result.price} to download certificate`;
     
     showNotification(message, 'success');
     
-    // In real implementation, redirect to payment page
-    // window.location.href = `/pay/${result.certificateId}`;
-    }
-    
-    function cancelVerification() {
+    // Optional: Store result in sessionStorage for payment page
+    sessionStorage.setItem('lastVerification', JSON.stringify(result));
+}
+
+function cancelVerification() {
     if (state.isVerifying) {
-    state.isVerifying = false;
-    if (loadingOverlay) {
-    loadingOverlay.classList.remove('active');
+        state.isVerifying = false;
+        if (loadingOverlay) {
+            loadingOverlay.classList.remove('active');
+        }
+        if (verifyBtn) {
+            verifyBtn.disabled = false;
+            verifyBtn.textContent = '🚀 VERIFY NOW';
+        }
+        showNotification('Verification cancelled', 'info');
     }
-    verifyBtn.disabled = false;
-    verifyBtn.textContent = '🚀 VERIFY NOW';
-    showNotification('Verification cancelled', 'info');
-    }
-    }
+}
+
+// ===== PRICING FUNCTIONS =====
+function selectTier(tier) {
+    if (!tierSelect || !videoInput) return;
     
-    // ===== PRICING FUNCTIONS =====
-    function selectTier(tier) {
     tierSelect.value = tier;
-    if (videoInput) {
     videoInput.focus();
-    }
     
     // Scroll to verification form smoothly
     const verificationCard = document.querySelector('.verification-card');
     if (verificationCard) {
-    verificationCard.scrollIntoView({ 
-    behavior: 'smooth',
-    block: 'center'
-    });
+        verificationCard.scrollIntoView({ 
+            behavior: 'smooth',
+            block: 'center'
+        });
     }
     
     showNotification(`${getTierName(tier)} tier selected`, 'info');
     trackEvent('pricing', 'select_tier', tier);
-    }
-    
-    function getTierPrice(tier) {
+}
+
+function getTierPrice(tier) {
     const prices = {
-    'test': '$0.01',
-    'custom': '$0.99',
-    'bronze': '$9.99',
-    'silver': '$49.99',
-    'gold': '$99.99'
+        'test': '$0.01',
+        'custom': '$0.99',
+        'bronze': '$9.99',
+        'silver': '$49.99',
+        'gold': '$99.99'
     };
     return prices[tier] || '$0.99';
-    }
-    
-    function getTierName(tier) {
+}
+
+function getTierName(tier) {
     const names = {
-    'test': 'Test',
-    'custom': 'Custom',
-    'bronze': 'Bronze Pack',
-    'silver': 'Silver Pack',
-    'gold': 'Gold Pack'
+        'test': 'Test',
+        'custom': 'Custom',
+        'bronze': 'Bronze Pack',
+        'silver': 'Silver Pack',
+        'gold': 'Gold Pack'
     };
     return names[tier] || 'Custom';
-    }
-    
-    // ===== NOTIFICATION SYSTEM =====
-    function showNotification(message, type = 'info') {
+}
+
+// ===== NOTIFICATION SYSTEM =====
+function showNotification(message, type = 'info') {
     // Remove existing notification
     const existing = document.querySelector('.notification');
     if (existing) existing.remove();
@@ -2273,201 +2298,226 @@
     // Create notification element
     const notification = document.createElement('div');
     notification.className = `notification notification-${type}`;
+    
+    // Format message (replace newlines with <br>)
+    const formattedMessage = message.replace(/\n/g, '<br>');
+    
     notification.innerHTML = `
-    <span class="notification-icon">${getNotificationIcon(type)}</span>
-    <span class="notification-text">${message}</span>
-    <button class="notification-close">×</button>
+        <span class="notification-icon">${getNotificationIcon(type)}</span>
+        <span class="notification-text">${formattedMessage}</span>
+        <button class="notification-close" aria-label="Close">&times;</button>
     `;
     
     // Add styles
     notification.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background: ${getNotificationColor(type)};
-    color: white;
-    padding: 12px 16px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    z-index: 2000;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    animation: slideIn 0.3s ease;
-    max-width: 400px;
-    word-break: break-word;
-    white-space: pre-line;
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: ${getNotificationColor(type)};
+        color: white;
+        padding: 16px 20px;
+        border-radius: 8px;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        z-index: 9999;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        animation: slideIn 0.3s ease;
+        max-width: 400px;
+        min-width: 300px;
+        word-break: break-word;
+        font-size: 14px;
+        line-height: 1.5;
     `;
     
-    // Add close button styles
+    // Style the close button
     const closeBtn = notification.querySelector('.notification-close');
-    closeBtn.style.cssText = `
-    background: none;
-    border: none;
-    color: white;
-    font-size: 20px;
-    cursor: pointer;
-    padding: 0;
-    margin-left: 10px;
-    flex-shrink: 0;
-    `;
+    if (closeBtn) {
+        closeBtn.style.cssText = `
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            margin-left: auto;
+            flex-shrink: 0;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+            line-height: 1;
+        `;
+        closeBtn.addEventListener('mouseenter', () => {
+            closeBtn.style.opacity = '1';
+        });
+        closeBtn.addEventListener('mouseleave', () => {
+            closeBtn.style.opacity = '0.8';
+        });
+    }
     
-    // Add animation keyframes
-    if (!document.querySelector('#notification-styles')) {
-    const style = document.createElement('style');
-    style.id = 'notification-styles';
-    style.textContent = `
-    @keyframes slideIn {
-    from {
-    transform: translateX(100%);
-    opacity: 0;
-    }
-    to {
-    transform: translateX(0);
-    opacity: 1;
-    }
-    }
-    @keyframes slideOut {
-    from {
-    transform: translateX(0);
-    opacity: 1;
-    }
-    to {
-    transform: translateX(100%);
-    opacity: 0;
-    }
-    }
-    `;
-    document.head.appendChild(style);
+    // Add animation keyframes if not exists
+    if (!document.getElementById('notification-styles')) {
+        const style = document.createElement('style');
+        style.id = 'notification-styles';
+        style.textContent = `
+            @keyframes slideIn {
+                from {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+            }
+            @keyframes slideOut {
+                from {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+                to {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+            }
+            .notification {
+                pointer-events: auto;
+            }
+            .notification-close:hover {
+                opacity: 1 !important;
+            }
+        `;
+        document.head.appendChild(style);
     }
     
     // Add to document
     document.body.appendChild(notification);
     
     // Close button event
-    closeBtn.addEventListener('click', () => {
-    notification.style.animation = 'slideOut 0.3s ease';
-    setTimeout(() => notification.remove(), 300);
-    });
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            notification.style.animation = 'slideOut 0.3s ease';
+            setTimeout(() => notification.remove(), 300);
+        });
+    }
     
     // Auto-remove after appropriate time
     const duration = type === 'error' ? 8000 : 5000;
     setTimeout(() => {
-    if (notification.parentNode) {
-    notification.style.animation = 'slideOut 0.3s ease';
-    setTimeout(() => notification.remove(), 300);
-    }
+        if (notification.parentNode) {
+            notification.style.animation = 'slideOut 0.3s ease';
+            setTimeout(() => notification.remove(), 300);
+        }
     }, duration);
-    }
-    
-    function getNotificationIcon(type) {
+}
+
+function getNotificationIcon(type) {
     const icons = {
-    success: '✅',
-    error: '❌',
-    warning: '⚠️',
-    info: 'ℹ️'
+        success: '✅',
+        error: '❌',
+        warning: '⚠️',
+        info: 'ℹ️'
     };
     return icons[type] || 'ℹ️';
-    }
-    
-    function getNotificationColor(type) {
+}
+
+function getNotificationColor(type) {
     const colors = {
-    success: '#10b981',
-    error: '#ef4444',
-    warning: '#f59e0b',
-    info: '#3b82f6'
+        success: '#10b981',
+        error: '#ef4444',
+        warning: '#f59e0b',
+        info: '#3b82f6'
     };
     return colors[type] || '#3b82f6';
-    }
-    
-    // ===== RESPONSIVE HANDLING =====
-    function handleResize() {
+}
+
+// ===== RESPONSIVE HANDLING =====
+function handleResize() {
     const wasMobile = state.isMobile;
     state.isMobile = window.innerWidth <= 820;
     
     // If switching between mobile/desktop, close menu
     if (wasMobile !== state.isMobile && state.isMenuOpen) {
-    closeMenu();
+        closeMenu();
     }
     
     // Update element visibility
     setupResponsiveBehavior();
-    }
-    
-    function setupResponsiveBehavior() {
+}
+
+function setupResponsiveBehavior() {
     const searchStrip = document.querySelector('.search-strip');
     const isMobile = window.innerWidth <= 820;
     
     // Update search visibility
     if (searchStrip) {
-    searchStrip.style.display = isMobile ? 'block' : 'none';
+        searchStrip.style.display = isMobile ? 'block' : 'none';
     }
     
     // Update hamburger visibility
     if (mobileMenuOpen) {
-    mobileMenuOpen.style.display = isMobile ? 'flex' : 'none';
+        mobileMenuOpen.style.display = isMobile ? 'flex' : 'none';
     }
     
     if (desktopMenuOpen) {
-    desktopMenuOpen.style.display = isMobile ? 'none' : 'flex';
+        desktopMenuOpen.style.display = isMobile ? 'none' : 'flex';
     }
     
     // More menu visibility - visible on both mobile and desktop
     if (moreMenuBtn) {
-    moreMenuBtn.style.display = isMobile ? 'flex' : 'flex';
+        moreMenuBtn.style.display = 'flex';
     }
     
     // Update sign in/up buttons visibility
     const signInButtons = document.querySelectorAll('.btn-signin, .btn-signup-header');
     signInButtons.forEach(btn => {
-    btn.style.display = isMobile ? 'none' : 'inline-block';
+        btn.style.display = isMobile ? 'none' : 'inline-block';
     });
     
     // Update menu signin buttons
     const menuSigninButtons = document.querySelectorAll('.menu-signin');
     menuSigninButtons.forEach(btn => {
-    btn.style.display = isMobile ? 'inline-block' : 'none';
+        btn.style.display = isMobile ? 'inline-block' : 'none';
     });
     
     // Update search bar visibility
     const headerSearch = document.querySelector('.header-search');
     if (headerSearch) {
-    headerSearch.style.display = isMobile ? 'none' : 'flex';
+        headerSearch.style.display = isMobile ? 'none' : 'flex';
     }
-    }
-    
-    // ===== UTILITY FUNCTIONS =====
-    function debounce(func, wait) {
+}
+
+// ===== UTILITY FUNCTIONS =====
+function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
-    const later = () => {
-    clearTimeout(timeout);
-    func(...args);
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
     };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-    };
-    }
-    
-    // ===== ANALYTICS =====
-    function trackEvent(category, action, label) {
+}
+
+// ===== ANALYTICS =====
+function trackEvent(category, action, label) {
     // Implement analytics tracking here
     console.log(`[Analytics] ${category} - ${action} - ${label}`);
     
     // Example: Google Analytics
     if (typeof gtag !== 'undefined') {
-    gtag('event', action, {
-    'event_category': category,
-    'event_label': label
-    });
+        gtag('event', action, {
+            'event_category': category,
+            'event_label': label
+        });
     }
-    }
-    
-    // Make debounced resize handler
-    window.addEventListener('resize', debounce(handleResize, 250));
-    
-    // Scroll tracking
-    window.addEventListener('scroll', debounce(() => {
+}
+
+// Make debounced resize handler
+window.addEventListener('resize', debounce(handleResize, 250));
+
+// Scroll tracking
+window.addEventListener('scroll', debounce(() => {
     const scrollPosition = window.pageYOffset;
     const windowHeight = window.innerHeight;
     const docHeight = document.documentElement.scrollHeight;
@@ -2475,14 +2525,13 @@
     const scrollPercentage = (scrollPosition / (docHeight - windowHeight)) * 100;
     
     if (scrollPercentage > 75) {
-    trackEvent('engagement', 'scroll_depth', '75%');
+        trackEvent('engagement', 'scroll_depth', '75%');
     } else if (scrollPercentage > 50) {
-    trackEvent('engagement', 'scroll_depth', '50%');
+        trackEvent('engagement', 'scroll_depth', '50%');
     } else if (scrollPercentage > 25) {
-    trackEvent('engagement', 'scroll_depth', '25%');
+        trackEvent('engagement', 'scroll_depth', '25%');
     }
-    }, 500));
-    </script>
-    
+}, 500));
+</script>
 </body>
 </html>
