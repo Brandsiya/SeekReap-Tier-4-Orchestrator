@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SeekReap - Video Verification</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+        
+        input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.2s;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 14px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .status-box {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 8px;
+            background: #f8f9fa;
+            display: none;
+        }
+        
+        .status-box.visible {
+            display: block;
+        }
+        
+        .status-queued {
+            color: #f59e0b;
+        }
+        
+        .status-processing {
+            color: #3b82f6;
+        }
+        
+        .status-processed {
+            color: #10b981;
+        }
+        
+        .result-details {
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .evidence-hash {
+            font-family: monospace;
+            background: #f1f5f9;
+            padding: 10px;
+            border-radius: 4px;
+            word-break: break-all;
+            margin: 10px 0;
+        }
+        
+        pre {
+            background: #f1f5f9;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        
+        .polling-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            color: #666;
+        }
+        
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error {
+            color: #ef4444;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Video Verification</h1>
+        <p class="subtitle">Enter your details to start the verification process</p>
+        
+        <div class="form-group">
+            <label>Creator ID</label>
+            <input type="text" id="creatorId" placeholder="e.g., user_123456" value="user_123456">
+        </div>
+        
+        <div class="form-group">
+            <label>Video URL</label>
+            <input type="text" id="videoUrl" placeholder="https://youtube.com/watch?v=123" value="https://youtube.com/watch?v=123">
+        </div>
+        
+        <button id="verifyBtn">Start Verification</button>
+        
+        <div class="status-box" id="statusBox">
+            <h3>Verification Status</h3>
+            <div id="statusContent"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://seekreap-tier-4-orchestrator.onrender.com';
+        
+        let pollInterval = null;
+        
+        document.getElementById('verifyBtn').addEventListener('click', startVerification);
+        
+        async function startVerification() {
+            const creatorId = document.getElementById('creatorId').value.trim();
+            const videoUrl = document.getElementById('videoUrl').value.trim();
+            
+            if (!creatorId || !videoUrl) {
+                alert('Creator ID and Video URL are required');
+                return;
+            }
+            
+            const verifyBtn = document.getElementById('verifyBtn');
+            verifyBtn.disabled = true;
+            verifyBtn.textContent = 'Starting...';
+            
+            const statusBox = document.getElementById('statusBox');
+            const statusContent = document.getElementById('statusContent');
+            
+            statusBox.classList.add('visible');
+            statusContent.innerHTML = `
+                <div class="polling-indicator">
+                    <div class="spinner"></div>
+                    <span>Starting verification...</span>
+                </div>
+            `;
+            
+            try {
+                const response = await fetch(`${API_URL}/process-video`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        creatorId,
+                        videoUrl,
+                        title: 'Manual Verification',
+                        usesThirdPartyMusic: false
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Verification failed');
+                }
+                
+                console.log('Verification started:', data);
+                
+                statusContent.innerHTML = `
+                    <div class="status-queued">
+                        <strong>✓ Queued</strong>
+                        <p>Video ID: ${data.videoId}</p>
+                    </div>
+                    <div class="polling-indicator">
+                        <div class="spinner"></div>
+                        <span>Waiting for processing...</span>
+                    </div>
+                `;
+                
+                pollVerification(data.videoId);
+                
+            } catch (error) {
+                console.error('Error:', error);
+                statusContent.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+                verifyBtn.disabled = false;
+                verifyBtn.textContent = 'Start Verification';
+            }
+        }
+        
+        function pollVerification(videoId) {
+            if (pollInterval) clearInterval(pollInterval);
+            
+            pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${API_URL}/video/${videoId}`);
+                    const result = await response.json();
+                    
+                    console.log('Poll result:', result);
+                    
+                    const statusContent = document.getElementById('statusContent');
+                    
+                    if (result.status === 'queued') {
+                        statusContent.innerHTML = `
+                            <div class="status-queued">
+                                <strong>⏳ Queued</strong>
+                                <p>Video ID: ${result.id}</p>
+                            </div>
+                            <div class="polling-indicator">
+                                <div class="spinner"></div>
+                                <span>Waiting in queue...</span>
+                            </div>
+                        `;
+                    } 
+                    else if (result.status === 'processing') {
+                        statusContent.innerHTML = `
+                            <div class="status-processing">
+                                <strong>⚙️ Processing</strong>
+                                <p>Video ID: ${result.id}</p>
+                            </div>
+                            <div class="polling-indicator">
+                                <div class="spinner"></div>
+                                <span>Analyzing video...</span>
+                            </div>
+                        `;
+                    }
+                    else if (result.status === 'processed') {
+                        clearInterval(pollInterval);
+                        renderVerificationResult(result);
+                    }
+                    
+                } catch (error) {
+                    console.error('Polling error:', error);
+                }
+            }, 2000);
+        }
+        
+        function renderVerificationResult(result) {
+            const statusContent = document.getElementById('statusContent');
+            
+            const flagsHTML = result.flags ? 
+                `<pre>${JSON.stringify(result.flags, null, 2)}</pre>` : 
+                '<p>No flags generated</p>';
+            
+            statusContent.innerHTML = `
+                <div class="status-processed">
+                    <strong>✅ Verification Complete</strong>
+                    <p>Video ID: ${result.id}</p>
+                    <p>Processed at: ${result.processed_at ? new Date(result.processed_at).toLocaleString() : 'N/A'}</p>
+                </div>
+                
+                <div class="result-details">
+                    <h4>Evidence Hash</h4>
+                    <div class="evidence-hash">${result.evidence_hash || 'N/A'}</div>
+                    
+                    <h4 style="margin-top: 20px;">Flags</h4>
+                    ${flagsHTML}
+                </div>
+            `;
+            
+            const verifyBtn = document.getElementById('verifyBtn');
+            verifyBtn.disabled = false;
+            verifyBtn.textContent = 'Start Verification';
+        }
+    </script>
+</body>
+</html>
