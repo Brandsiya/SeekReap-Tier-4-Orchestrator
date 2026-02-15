@@ -1,66 +1,32 @@
-// server.js
-require('dotenv').config(); // Load .env first
+require('dotenv').config();
 
 const express = require('express');
 const { Pool } = require('pg');
 
+const app = express();
+app.use(express.json());
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
 app.get('/test-db', async (req, res) => {
   try {
-    const result = await pool.query('SELECT NOW()'); // simple test query
-    res.json({ status: 'ok', time: result.rows[0].now });
+    const result = await pool.query('SELECT NOW()');
+    res.json({ status: 'ok', database_time: result.rows[0].now });
   } catch (err) {
+    console.error('Database error:', err);
     res.status(500).json({ status: 'error', message: err.message });
   }
 });
 
-// ----- EXPRESS SETUP -----
-const app = express();
-const PORT = process.env.PORT || 10000;
-
-// Avoid multiple listeners if hot-reloading
-if (app.listening) {
-  app.close();
-}
-
-// ----- POSTGRES (NEON) SETUP -----
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // Required for Neon SSL
-});
-
-// Test DB connection
-(async () => {
-  try {
-    const client = await pool.connect();
-    console.log("Connected to Neon DB successfully");
-    // Example: create table if not exists
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS test_table (
-        id SERIAL PRIMARY KEY,
-        data TEXT
-      );
-    `);
-    client.release();
-  } catch (err) {
-    console.error("Database connection failed:", err);
-  }
-})();
-
-// ----- ROUTES -----
 app.get('/', (req, res) => {
-  res.send('SeekReap Tier-4 Server is running!');
+  res.json({ message: 'SeekReap Tier 4 Orchestrator running' });
 });
 
-// ----- SERVER LISTEN -----
-const server = app.listen(PORT, () => {
-  console.log(`SeekReap Tier-4 running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 3000;
 
-// Handle port in use errors gracefully
-server.on('error', err => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is already in use. Kill the old process and try again.`);
-  } else {
-    console.error(err);
-  }
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
