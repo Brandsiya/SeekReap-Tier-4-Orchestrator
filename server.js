@@ -1,3 +1,4 @@
+const tierOrchestrator = require('./tierOrchestrator');
 require('dotenv').config();
 
 const express = require('express');
@@ -5,6 +6,7 @@ const { Pool } = require('pg');
 
 const app = express();
 app.use(express.json());
+app.use('/', tierOrchestrator);
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
