@@ -8,12 +8,10 @@ const { Pool } = require('pg');
 const Queue = require('bull');
 const PDFDocument = require('pdfkit');
 const crypto = require('crypto');
-
 const app = express();
 const PORT = process.env.PORT || 10000;
 const DATABASE_URL = process.env.DATABASE_URL;
 const REDIS_URL = process.env.REDIS_URL;
-
 // =========================
 // Security & Middleware
 // =========================
@@ -22,7 +20,6 @@ app.use(helmet());
 app.use(morgan('combined'));
 app.use(express.json());
 app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }));
-
 // =========================
 // PostgreSQL Connection
 // =========================
@@ -30,7 +27,6 @@ const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
-
 // Initialize database
 (async () => {
   try {
@@ -53,7 +49,6 @@ const pool = new Pool({
     console.error("Table creation failed:", err);
   }
 })();
-
 // =========================
 // Redis Queue
 // =========================
@@ -61,14 +56,12 @@ const videoQueue = new Queue('video-processing', REDIS_URL, {
   defaultJobOptions: { removeOnComplete: true, removeOnFail: true },
   limiter: { max: 50, duration: 1000 }
 });
-
 // =========================
 // Serve static files
 // =========================
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
-
 // =========================
 // ✅ HEALTH CHECK ENDPOINT
 // =========================
@@ -78,31 +71,25 @@ app.get('/health', (req, res) => {
     uptime: process.uptime()
   });
 });
-
 // =========================
 // ✅ START VERIFICATION ENDPOINT
 // =========================
 app.post('/process-video', async (req, res) => {
   try {
     const { creatorId, videoUrl, title, usesThirdPartyMusic } = req.body;
-
     if (!creatorId || !videoUrl) {
       return res.status(400).json({
         error: 'creatorId and videoUrl are required'
       });
     }
-
     const videoId = `vid_${Date.now()}`;
-
     await pool.query(
       `INSERT INTO videos 
       (id, creator_id, video_url, title, uses_third_party_music, status)
       VALUES ($1, $2, $3, $4, $5, 'queued')`,
       [videoId, creatorId, videoUrl, title || null, usesThirdPartyMusic || false]
     );
-
     await videoQueue.add({ videoId });
-
     res.json({
       status: 'queued',
       videoId
@@ -112,31 +99,26 @@ app.post('/process-video', async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 // =========================
 // ✅ GET VERIFICATION STATUS ENDPOINT
 // =========================
 app.get('/video/:videoId', async (req, res) => {
   try {
     const { videoId } = req.params;
-
     const result = await pool.query(
       `SELECT id, status, flags, evidence_hash, created_at, processed_at 
        FROM videos WHERE id=$1`,
       [videoId]
     );
-
     if (!result.rows.length) {
       return res.status(404).json({ error: 'Video not found' });
     }
-
     res.json(result.rows[0]);
   } catch (err) {
     console.error("Fetch error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 // =========================
 // ✅ QUEUE WORKER PROCESSOR
 // =========================
@@ -151,7 +133,6 @@ videoQueue.process(10, async (job) => {
       `UPDATE videos SET status='processing' WHERE id=$1`,
       [videoId]
     );
-
     // Simulate verification pipeline (replace with your actual logic)
     const flags = {
       hasAudio: true,
@@ -165,7 +146,6 @@ videoQueue.process(10, async (job) => {
       .createHash('sha256')
       .update(JSON.stringify(flags) + Date.now())
       .digest('hex');
-
     // Update final status
     await pool.query(
       `UPDATE videos
@@ -176,7 +156,6 @@ videoQueue.process(10, async (job) => {
        WHERE id=$3`,
       [flags, evidenceHash, videoId]
     );
-
     console.log(`Video ${videoId} processed successfully`);
     return { success: true, videoId };
     
@@ -185,19 +164,14 @@ videoQueue.process(10, async (job) => {
     throw err;
   }
 });
-
 app.listen(PORT, () => {
   console.log(`SeekReap Tier-4 running on port ${PORT}`);
 });
-
 // =========================
 // Serve static files from public directory
 // =========================
-const path = require('path');
 app.use(express.static(path.join(__dirname, 'public')));
-
 // =========================
 // Serve static files from public directory
 // =========================
-const path = require('path');
 app.use(express.static(path.join(__dirname, 'public')));
