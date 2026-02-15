@@ -4,6 +4,15 @@ require('dotenv').config(); // Load .env first
 const express = require('express');
 const { Pool } = require('pg');
 
+app.get('/test-db', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT NOW()'); // simple test query
+    res.json({ status: 'ok', time: result.rows[0].now });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
 // ----- EXPRESS SETUP -----
 const app = express();
 const PORT = process.env.PORT || 10000;
