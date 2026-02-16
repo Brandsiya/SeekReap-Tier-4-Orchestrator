@@ -23,3 +23,9 @@ def process_envelope(envelope: Envelope):
         return await core.run_task(decision_envelope)
     
     return asyncio.run(runner())
+
+if __name__ == '__main__':
+    import os
+    import uvicorn
+    port = int(os.environ.get('PORT', 11000))
+    uvicorn.run(app, host='0.0.0.0', port=port)
