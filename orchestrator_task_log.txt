@@ -1,0 +1,5 @@
+2026-02-16 02:00:32.650495 | test_demo | demo_pipeline | failed | 0.004783s
+2026-02-16 02:03:42.563894 | test_demo | demo_pipeline | failed | 0.056175s
+2026-02-16 02:08:46.308144 | test_demo | demo_pipeline | failed | 0.017158s
+2026-02-16 02:10:45.578377 | test_demo | demo_pipeline | failed | 0.013229s
+2026-02-16 02:18:15.791062 | test_demo | demo_pipeline | failed | 0.059961s
