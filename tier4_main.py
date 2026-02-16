@@ -6,6 +6,11 @@ from orchestrator.orchestrator_core import OrchestratorCore
 from orchestrator.envelope_models import DecisionEnvelope
 
 app = FastAPI()
+
+@app.get("/")
+def health():
+    return {"status": "Tier-4 is running"}
+
 core = OrchestratorCore()
 
 class Envelope(BaseModel):
