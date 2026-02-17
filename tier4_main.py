@@ -2,6 +2,15 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import asyncio
 
+app = FastAPI()
+
+@app.get('/')
+async def root():
+    return {'status':'Tier-4 is running'}
+from fastapi import FastAPI
+from pydantic import BaseModel
+import asyncio
+
 from orchestrator.orchestrator_core import OrchestratorCore
 from orchestrator.envelope_models import DecisionEnvelope
 
