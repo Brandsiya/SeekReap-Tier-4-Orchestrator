@@ -1,43 +1,20 @@
 {
-  "name": "seekreap-tier-4-orchestrator",
-  "version": "1.0.0",
-  "description": "Tier-4 Orchestrator for SeekReap verification system",
+  "name": "seekreap-tier4-orchestrator",
+  "version": "2.0.0",
+  "description": "SeekReap Tier-4 Global Orchestrator",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "worker": "node worker-start.js"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "axios": "^1.13.5",
-    "bcryptjs": "^2.4.3",
-    "body-parser": "^1.20.2",
-    "bull": "^4.11.0",
-    "compression": "^1.7.4",
-    "cookie-parser": "^1.4.6",
-    "cors": "^2.8.5",
-    "dotenv": "^16.6.1",
     "express": "^4.18.2",
-    "express-rate-limit": "^6.7.0",
-    "helmet": "^7.0.0",
-    "joi": "^17.9.2",
-    "jsonwebtoken": "^9.0.0",
-    "morgan": "^1.10.0",
-    "multer": "^1.4.5-lts.1",
-    "pdfkit": "^0.17.2",
-    "pg": "^8.11.0",
-    "redis": "^4.6.5",
-    "uuid": "^9.0.0",
-    "winston": "^3.9.0"
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22"
-  },
-  "keywords": [
-    "verification",
-    "orchestrator",
-    "tier4"
-  ],
-  "author": "SeekReap",
-  "license": "ISC"
+    "nodemon": "^3.0.2"
+  }
 }
