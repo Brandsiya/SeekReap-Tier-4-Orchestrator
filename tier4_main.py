@@ -1,45 +1,164 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import asyncio
+import httpx
+import os
+from datetime import datetime
+from typing import Optional, Dict, Any, List
+import uvicorn
 
-app = FastAPI()
+app = FastAPI(title="SeekReap Tier-4 Orchestrator")
 
-@app.get('/')
-async def root():
-    return {'status':'Tier-4 is running'}
-from fastapi import FastAPI
-from pydantic import BaseModel
-import asyncio
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-from orchestrator.orchestrator_core import OrchestratorCore
-from orchestrator.envelope_models import DecisionEnvelope
+# Environment variables
+TIER3_URL = os.getenv("TIER3_URL", "https://seekreap-tier-3-private.onrender.com")
+PORT = int(os.getenv("PORT", 10000))
 
-app = FastAPI()
-
-@app.get("/")
-def health():
-    return {"status": "Tier-4 is running"}
-
-core = OrchestratorCore()
-
+# Pydantic models
 class Envelope(BaseModel):
-    task_id: str
-    task_type: str
-    inputs: dict
-    context: dict = {}
+    id: str
+    timestamp: float
+    payload: Dict[str, Any]
+    schema_version: str
+    orchestration_policy: str
+    signature: str
+    metadata: Dict[str, Any]
 
-@app.post("/process")
-def process_envelope(envelope: Envelope):
-    """Synchronous FastAPI endpoint that runs async orchestration"""
-    envelope_dict = envelope.dict()
-    async def runner():
-        decision_envelope = DecisionEnvelope(**envelope_dict)
-        return await core.run_task(decision_envelope)
+class BatchEnvelope(BaseModel):
+    envelopes: List[Envelope]
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    # Check connection to Tier-3
+    tier3_status = "unknown"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{TIER3_URL}/health", timeout=5.0)
+            if response.status_code == 200:
+                tier3_status = "healthy"
+            else:
+                tier3_status = "unhealthy"
+    except:
+        tier3_status = "unreachable"
     
-    return asyncio.run(runner())
+    return {
+        "status": "healthy",
+        "tier": 4,
+        "timestamp": datetime.now().isoformat(),
+        "tier3_url": TIER3_URL,
+        "tier3_status": tier3_status,
+        "version": "2.0.0"
+    }
 
-if __name__ == '__main__':
-    import os
-    import uvicorn
-    port = int(os.environ.get('PORT', 11000))
-    uvicorn.run(app, host='0.0.0.0', port=port)
+# Process single envelope endpoint
+@app.post("/process-envelope")
+async def process_envelope(envelope: Envelope):
+    """Process a single envelope by forwarding to Tier-3"""
+    print(f"Tier-4 received envelope: {envelope.id}")
+    print(f"Processing envelope: {envelope.id}")
+    print(f"Policy: {envelope.orchestration_policy}")
+    
+    try:
+        # Forward to Tier-3
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{TIER3_URL}/process-envelope",
+                json=envelope.dict(),
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                print(f"Tier-3 response: {result.get('decision', 'unknown')}")
+                return result
+            else:
+                print(f"Tier-3 error: {response.status_code}")
+                return {
+                    "decision": "ERROR",
+                    "confidence": 0,
+                    "risk_factors": [f"Tier-3 returned {response.status_code}"],
+                    "appeal_text": None,
+                    "job_id": envelope.payload.get("job_id")
+                }
+    except Exception as e:
+        print(f"Error forwarding to Tier-3: {str(e)}")
+        return {
+            "decision": "ERROR",
+            "confidence": 0,
+            "risk_factors": [f"Error: {str(e)}"],
+            "appeal_text": None,
+            "job_id": envelope.payload.get("job_id")
+        }
+
+# Process batch endpoint
+@app.post("/process-batch")
+async def process_batch(batch: BatchEnvelope):
+    """Process multiple envelopes in batch"""
+    print(f"Tier-4 received batch of {len(batch.envelopes)} envelopes")
+    
+    results = []
+    for envelope in batch.envelopes:
+        result = await process_envelope(envelope)
+        results.append(result)
+    
+    return {"results": results}
+
+# Test endpoint for creating test envelopes
+@app.post("/test-envelope")
+async def test_envelope(request: Request):
+    """Create a test envelope for development"""
+    data = await request.json()
+    
+    # Create a test envelope
+    test_envelope = {
+        "id": f"test-{datetime.now().timestamp()}",
+        "timestamp": datetime.now().timestamp(),
+        "payload": {
+            "job_id": data.get("job_id", 999),
+            "content_id": data.get("content_id", "test-content"),
+            "creator_id": data.get("creator_id", 1),
+            "job_type": data.get("job_type", "video"),
+            "params": data.get("params", {})
+        },
+        "schema_version": "tier2-envelope-v1",
+        "orchestration_policy": data.get("policy", "job_processing"),
+        "signature": f"test-signature-{datetime.now().timestamp()}",
+        "metadata": {
+            "source": "tier4_test",
+            "test": True
+        }
+    }
+    
+    # Process it
+    return await process_envelope(Envelope(**test_envelope))
+
+# Root endpoint
+@app.get("/")
+async def root():
+    return {
+        "status": "Tier-4 is running",
+        "version": "2.0.0",
+        "endpoints": [
+            "/health",
+            "/process-envelope",
+            "/process-batch",
+            "/test-envelope",
+            "/docs",
+            "/redoc"
+        ]
+    }
+
+# OpenAPI docs endpoints are auto-generated by FastAPI
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
