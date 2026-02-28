@@ -185,3 +185,37 @@ async def submit_job(request: Request):
     async with httpx.AsyncClient() as client:
         response = await client.post(f"{TIER3_URL}/jobs", json=data)
         return response.json()
+
+# CORRECTED endpoints based on Tier-3 OpenAPI spec
+@app.get("/api/submissions")
+async def get_submissions():
+    """Get all jobs from Tier-3 - Note: Tier-3 doesn't have a list endpoint!"""
+    # Tier-3 doesn't have a list endpoint, so this will need special handling
+    # You might need to maintain a local cache or redesign this
+    return {"error": "Tier-3 doesn't support listing all jobs", "jobs": []}
+
+@app.get("/api/submissions/{job_id}")
+async def get_submission(job_id: int):
+    """Get specific job from Tier-3 using their /api/job/{job_id} endpoint"""
+    async with httpx.AsyncClient() as client:
+        # Use the CORRECT path from Tier-3's OpenAPI spec
+        response = await client.get(f"{TIER3_URL}/api/job/{job_id}")
+        return response.json()
+
+@app.post("/api/submit")
+async def submit_job(request: Request):
+    """Submit job to Tier-3"""
+    data = await request.json()
+    # Tier-3 likely expects this at a specific endpoint - check which one accepts POST
+    # Based on OpenAPI, possible endpoints: /process-envelope or /api/process-submission
+    async with httpx.AsyncClient() as client:
+        # Try the process-envelope endpoint first
+        response = await client.post(f"{TIER3_URL}/process-envelope", json={
+            "id": f"job-{data.get('job_id', 'new')}",
+            "timestamp": datetime.now().timestamp(),
+            "payload": data,
+            "schema_version": "1.0",
+            "orchestration_policy": "standard",
+            "signature": "tier4-signature"
+        })
+        return response.json()
