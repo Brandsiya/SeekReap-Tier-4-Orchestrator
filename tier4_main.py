@@ -162,3 +162,26 @@ async def root():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
+
+# Add job endpoints that proxy to Tier-3
+@app.get("/api/submissions")
+async def get_submissions():
+    """Get all jobs from Tier-3"""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"{TIER3_URL}/jobs")
+        return response.json()
+
+@app.get("/api/submissions/{job_id}")
+async def get_submission(job_id: int):
+    """Get specific job from Tier-3"""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"{TIER3_URL}/jobs/{job_id}")
+        return response.json()
+
+@app.post("/api/submit")
+async def submit_job(request: Request):
+    """Submit job to Tier-3"""
+    data = await request.json()
+    async with httpx.AsyncClient() as client:
+        response = await client.post(f"{TIER3_URL}/jobs", json=data)
+        return response.json()
