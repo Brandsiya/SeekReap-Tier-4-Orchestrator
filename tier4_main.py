@@ -733,3 +733,75 @@ async def submit_job_final_v2(request: Request):
     except Exception as e:
         print(f"Error: {e}")
         return {"error": str(e)}, 500
+
+# FINAL FIXED ENDPOINT - Returns the REAL database job_id
+@app.post("/api/submit-production")
+async def submit_job_production(request: Request):
+    """Submit job and return the REAL database job_id"""
+    try:
+        data = await request.json()
+        
+        # Create envelope with job data
+        envelope = {
+            "id": f"job-{int(datetime.now().timestamp())}",
+            "timestamp": datetime.now().timestamp(),
+            "payload": {
+                "job_id": int(datetime.now().timestamp()),  # Temporary ID for this request
+                "status": "pending",
+                "created_at": datetime.now().isoformat(),
+                "completed_at": None,
+                "failure_reason": None,
+                "params": {
+                    "url": data.get("url", ""),
+                    "creator_id": data.get("creator_id", 1)
+                },
+                "job_type": data.get("job_type", "url")
+            },
+            "schema_version": "1.0",
+            "orchestration_policy": "standard",
+            "signature": "tier4-signature",
+            "metadata": {
+                "source": "tier4-frontend",
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+        
+        print(f"Sending envelope: {envelope}")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{TIER3_URL}/process-envelope",
+                json=envelope,
+                timeout=10.0
+            )
+            
+            print(f"Status: {response.status_code}")
+            print(f"Response: {response.text}")
+            
+            if response.status_code == 200:
+                tier3_response = response.json()
+                
+                # Check if Tier-3 returned a job_id (it should be the database ID)
+                real_job_id = tier3_response.get("job_id")
+                
+                if real_job_id:
+                    # Return the REAL database job_id to the frontend
+                    return {
+                        "job_id": real_job_id,  # This is the correct database ID!
+                        "decision": tier3_response.get("decision"),
+                        "risk_score": tier3_response.get("risk_score"),
+                        "details": tier3_response.get("details")
+                    }
+                else:
+                    # Fallback to the original response
+                    return tier3_response
+            else:
+                return {
+                    "error": f"Tier-3 returned {response.status_code}",
+                    "details": response.text,
+                    "envelope_sent": envelope
+                }, response.status_code
+                
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"error": str(e)}, 500
