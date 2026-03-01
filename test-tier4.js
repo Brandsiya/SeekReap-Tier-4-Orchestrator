@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const TIER4_URL = process.env.TIER4_URL || 'http://localhost:3000';
+const TIER4_URL = process.env.TIER4_URL || 'http://localhost:10000';
 
 async function testTier4() {
     console.log('=== Testing Tier-4 Orchestrator ===\n');
