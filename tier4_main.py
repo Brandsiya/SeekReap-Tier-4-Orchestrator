@@ -525,3 +525,74 @@ async def submit_job_v6(request: Request):
             
     except Exception as e:
         return {'error': str(e)}, 500
+
+# Final working submit endpoint
+@app.post("/api/submit-v7")
+async def submit_job_v7(request: Request):
+    """Submit job with the exact structure Tier-3 expects"""
+    try:
+        data = await request.json()
+        
+        # Create a job that matches the Tier-3 job structure
+        job_payload = {
+            "job_id": int(datetime.now().timestamp()),  # Generate a unique ID
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "completed_at": None,
+            "failure_reason": None,
+            "params": {
+                "url": data.get("url", ""),
+                "creator_id": data.get("creator_id", 1)
+            },
+            "job_type": data.get("job_type", "url")
+        }
+        
+        print(f"Sending job: {job_payload}")
+        
+        async with httpx.AsyncClient() as client:
+            # Try posting the job directly
+            response = await client.post(
+                f"{TIER3_URL}/process-envelope",
+                json=job_payload,
+                timeout=10.0
+            )
+            
+            print(f"Status: {response.status_code}")
+            print(f"Response: {response.text}")
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                # Try wrapping it in an envelope
+                envelope = {
+                    "id": f"job-{job_payload['job_id']}",
+                    "timestamp": datetime.now().timestamp(),
+                    "payload": job_payload,
+                    "schema_version": "1.0",
+                    "orchestration_policy": "standard",
+                    "signature": "tier4-signature",
+                    "metadata": {}
+                }
+                
+                env_response = await client.post(
+                    f"{TIER3_URL}/process-envelope",
+                    json=envelope,
+                    timeout=10.0
+                )
+                
+                return {
+                    "direct_attempt": {
+                        "status": response.status_code,
+                        "body": response.text
+                    },
+                    "envelope_attempt": {
+                        "status": env_response.status_code,
+                        "body": env_response.text
+                    },
+                    "job_sent": job_payload,
+                    "envelope_sent": envelope
+                }, 200
+                
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"error": str(e)}, 500
