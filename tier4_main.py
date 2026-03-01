@@ -284,3 +284,56 @@ async def submit_job_v2(request: Request):
     except Exception as e:
         print(f"Error in submit: {e}")
         return {"error": str(e)}, 500
+
+# Minimal working envelope based on OpenAPI spec
+@app.post("/api/submit-v3")
+async def submit_job_v3(request: Request):
+    """Submit job with minimal correct envelope format"""
+    try:
+        data = await request.json()
+        
+        # Create a SIMPLE envelope - just what's required
+        envelope = {
+            "id": f"job-{int(datetime.now().timestamp())}",
+            "timestamp": datetime.now().timestamp(),
+            "payload": {
+                "url": data.get("url", ""),
+                "creator_id": data.get("creator_id", 1),
+                "job_type": data.get("job_type", "url")
+            },
+            "schema_version": "1.0",
+            "orchestration_policy": "standard",
+            "signature": "tier4-signature",
+            "metadata": {}  # Empty object, not null
+        }
+        
+        print(f"Sending envelope: {envelope}")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{TIER3_URL}/process-envelope",
+                json=envelope,
+                timeout=10.0
+            )
+            
+            print(f"Status: {response.status_code}")
+            print(f"Response: {response.text}")
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                # Try alternative endpoint
+                alt_response = await client.post(
+                    f"{TIER3_URL}/api/process-submission",
+                    json=payload,
+                    timeout=10.0
+                )
+                return {
+                    "primary_error": response.text,
+                    "alt_status": alt_response.status_code,
+                    "alt_response": alt_response.text
+                }, 500
+                
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"error": str(e)}, 500
