@@ -231,3 +231,56 @@ async def root():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
+
+# Improved submit endpoint with correct envelope format
+@app.post("/api/submit-v2")
+async def submit_job_v2(request: Request):
+    """Submit job to Tier-3 with correct envelope format"""
+    try:
+        data = await request.json()
+        
+        # Create a proper envelope based on Tier-3's schema
+        envelope = {
+            "id": f"job-{int(datetime.now().timestamp())}",
+            "timestamp": datetime.now().timestamp(),
+            "payload": {
+                "creator_id": data.get("creator_id", 1),
+                "content": {
+                    "url": data.get("url", ""),
+                    "type": data.get("job_type", "url")
+                },
+                "metadata": {
+                    "source": "tier4-frontend",
+                    "timestamp": datetime.now().isoformat()
+                }
+            },
+            "schema_version": "1.0",
+            "orchestration_policy": data.get("policy", "standard"),
+            "signature": "tier4-signature",
+            "metadata": {
+                "client": "web",
+                "request_id": str(uuid.uuid4())
+            }
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{TIER3_URL}/process-envelope", 
+                json=envelope, 
+                timeout=10.0
+            )
+            
+            print(f"Submit response: {response.status_code} - {response.text}")
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {
+                    "error": f"Tier-3 returned {response.status_code}",
+                    "details": response.text,
+                    "envelope_sent": envelope  # For debugging
+                }, response.status_code
+                
+    except Exception as e:
+        print(f"Error in submit: {e}")
+        return {"error": str(e)}, 500
