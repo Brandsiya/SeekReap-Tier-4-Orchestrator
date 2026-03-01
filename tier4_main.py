@@ -455,3 +455,73 @@ async def submit_job_v5(request: Request):
     except Exception as e:
         print(f"Error: {e}")
         return {"error": str(e)}, 500
+
+# Try different HTTP methods for submission
+@app.post("/api/submit-v6")
+async def submit_job_v6(request: Request):
+    """Try different approaches for submission"""
+    try:
+        data = await request.json()
+        
+        # Create a simple envelope
+        envelope = {
+            "id": f"job-{int(datetime.now().timestamp())}",
+            "timestamp": datetime.now().timestamp(),
+            "payload": data,
+            "schema_version": "1.0",
+            "orchestration_policy": "standard",
+            "signature": "tier4-signature"
+        }
+        
+        results = {}
+        
+        async with httpx.AsyncClient() as client:
+            # Try POST first
+            try:
+                resp = await client.post(
+                    f"{TIER3_URL}/process-envelope",
+                    json=envelope,
+                    timeout=10.0
+                )
+                results['POST'] = {
+                    'status': resp.status_code,
+                    'body': resp.text
+                }
+            except Exception as e:
+                results['POST'] = {'error': str(e)}
+            
+            # Try PUT
+            try:
+                resp = await client.put(
+                    f"{TIER3_URL}/process-envelope",
+                    json=envelope,
+                    timeout=10.0
+                )
+                results['PUT'] = {
+                    'status': resp.status_code,
+                    'body': resp.text
+                }
+            except Exception as e:
+                results['PUT'] = {'error': str(e)}
+            
+            # Try with query parameters
+            try:
+                resp = await client.get(
+                    f"{TIER3_URL}/process-envelope",
+                    params={'data': str(envelope)},
+                    timeout=10.0
+                )
+                results['GET'] = {
+                    'status': resp.status_code,
+                    'body': resp.text
+                }
+            except Exception as e:
+                results['GET'] = {'error': str(e)}
+            
+            return {
+                'envelope_sent': envelope,
+                'results': results
+            }, 200
+            
+    except Exception as e:
+        return {'error': str(e)}, 500
