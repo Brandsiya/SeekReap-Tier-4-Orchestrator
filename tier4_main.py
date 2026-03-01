@@ -627,3 +627,52 @@ async def submit_job_final(request: Request):
     except Exception as e:
         print(f"Error: {e}")
         return {"error": str(e)}, 500
+
+# THE WORKING ENDPOINT - Uses correct envelope format
+@app.post("/api/submit-working")
+async def submit_job_working(request: Request):
+    """Submit job using the correct envelope format that Tier-3 validates"""
+    try:
+        data = await request.json()
+        
+        # Create envelope with ALL required fields
+        envelope = {
+            "id": f"job-{int(datetime.now().timestamp())}",
+            "timestamp": datetime.now().timestamp(),
+            "payload": {
+                "job_data": data  # Put the actual data inside payload
+            },
+            "schema_version": "1.0",
+            "orchestration_policy": "standard",
+            "signature": "tier4-signature",
+            "metadata": {
+                "source": "tier4-frontend",
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+        
+        print(f"Sending envelope: {envelope}")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{TIER3_URL}/process-envelope",
+                json=envelope,
+                timeout=10.0
+            )
+            
+            print(f"Status: {response.status_code}")
+            print(f"Response: {response.text}")
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {
+                    "error": f"Tier-3 returned {response.status_code}",
+                    "details": response.text,
+                    "envelope_sent": envelope,
+                    "validation_hint": "Make sure all required fields are present: id, timestamp, payload, schema_version, orchestration_policy, signature"
+                }, response.status_code
+                
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"error": str(e)}, 500
