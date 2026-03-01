@@ -1,30 +1,20 @@
-import httpx
-from datetime import datetime
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import httpx
 import os
+import uuid
+import httpx
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Dict, List, Any, Optional
+from fastapi import FastAPI, Request, HTTPException
+from pydantic import BaseModel
 import uvicorn
 
-app = FastAPI(title="SeekReap Tier-4 Orchestrator")
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # Environment variables
-TIER3_URL = os.getenv("TIER3_URL", "https://seekreap-tier-3-private.onrender.com")
 PORT = int(os.getenv("PORT", 10000))
+TIER3_URL = os.getenv("TIER3_URL", "https://seekreap-tier-3-private.onrender.com")
 
-# Pydantic models
+# FastAPI app
+app = FastAPI(title="SeekReap Tier-4 Orchestrator", version="2.0.0")
+
+# Models
 class Envelope(BaseModel):
     id: str
     timestamp: float
@@ -32,7 +22,7 @@ class Envelope(BaseModel):
     schema_version: str
     orchestration_policy: str
     signature: str
-    metadata: Dict[str, Any]
+    metadata: Optional[Dict[str, Any]] = None
 
 class BatchEnvelope(BaseModel):
     envelopes: List[Envelope]
@@ -48,8 +38,6 @@ async def health_check():
             response = await client.get(f"{TIER3_URL}/health", timeout=5.0)
             if response.status_code == 200:
                 tier3_status = "healthy"
-            else:
-                tier3_status = "unhealthy"
     except:
         tier3_status = "unreachable"
     
@@ -62,173 +50,13 @@ async def health_check():
         "version": "2.0.0"
     }
 
-# Process single envelope endpoint
-@app.post("/process-envelope")
-async def process_envelope(envelope: Envelope):
-    """Process a single envelope by forwarding to Tier-3"""
-    print(f"Tier-4 received envelope: {envelope.id}")
-    print(f"Processing envelope: {envelope.id}")
-    print(f"Policy: {envelope.orchestration_policy}")
-    
-    try:
-        # Forward to Tier-3
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{TIER3_URL}/process-envelope",
-                json=envelope.dict(),
-                timeout=30.0
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                print(f"Tier-3 response: {result.get('decision', 'unknown')}")
-                return result
-            else:
-                print(f"Tier-3 error: {response.status_code}")
-                return {
-                    "decision": "ERROR",
-                    "confidence": 0,
-                    "risk_factors": [f"Tier-3 returned {response.status_code}"],
-                    "appeal_text": None,
-                    "job_id": envelope.payload.get("job_id")
-                }
-    except Exception as e:
-        print(f"Error forwarding to Tier-3: {str(e)}")
-        return {
-            "decision": "ERROR",
-            "confidence": 0,
-            "risk_factors": [f"Error: {str(e)}"],
-            "appeal_text": None,
-            "job_id": envelope.payload.get("job_id")
-        }
-
-# Process batch endpoint
-@app.post("/process-batch")
-async def process_batch(batch: BatchEnvelope):
-    """Process multiple envelopes in batch"""
-    print(f"Tier-4 received batch of {len(batch.envelopes)} envelopes")
-    
-    results = []
-    for envelope in batch.envelopes:
-        result = await process_envelope(envelope)
-        results.append(result)
-    
-    return {"results": results}
-
-# Test endpoint for creating test envelopes
-@app.post("/test-envelope")
-async def test_envelope(request: Request):
-    """Create a test envelope for development"""
-    data = await request.json()
-    
-    # Create a test envelope
-    test_envelope = {
-        "id": f"test-{datetime.now().timestamp()}",
-        "timestamp": datetime.now().timestamp(),
-        "payload": {
-            "job_id": data.get("job_id", 999),
-            "content_id": data.get("content_id", "test-content"),
-            "creator_id": data.get("creator_id", 1),
-            "job_type": data.get("job_type", "video"),
-            "params": data.get("params", {})
-        },
-        "schema_version": "tier2-envelope-v1",
-        "orchestration_policy": data.get("policy", "job_processing"),
-        "signature": f"test-signature-{datetime.now().timestamp()}",
-        "metadata": {
-            "source": "tier4_test",
-            "test": True
-        }
-    }
-    
-    # Process it
-    return await process_envelope(Envelope(**test_envelope))
-
-# Root endpoint
-@app.get("/")
-async def root():
-    return {
-        "status": "Tier-4 is running",
-        "version": "2.0.0",
-        "endpoints": [
-            "/health",
-            "/process-envelope",
-            "/process-batch",
-            "/test-envelope",
-            "/docs",
-            "/redoc"
-        ]
-    }
-
-# OpenAPI docs endpoints are auto-generated by FastAPI
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
-
-# Add job endpoints that proxy to Tier-3
-@app.get("/api/submissions")
-async def get_submissions():
-    """Get all jobs from Tier-3"""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{TIER3_URL}/jobs")
-        return response.json()
-
-@app.get("/api/submissions/{job_id}")
-async def get_submission(job_id: int):
-    """Get specific job from Tier-3"""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{TIER3_URL}/jobs/{job_id}")
-        return response.json()
-
-@app.post("/api/submit")
-async def submit_job(request: Request):
-    """Submit job to Tier-3"""
-    data = await request.json()
-    async with httpx.AsyncClient() as client:
-        response = await client.post(f"{TIER3_URL}/jobs", json=data)
-        return response.json()
-
-# CORRECTED endpoints based on Tier-3 OpenAPI spec
-@app.get("/api/submissions")
-async def get_submissions():
-    """Get all jobs from Tier-3 - Note: Tier-3 doesn't have a list endpoint!"""
-    # Tier-3 doesn't have a list endpoint, so this will need special handling
-    # You might need to maintain a local cache or redesign this
-    return {"error": "Tier-3 doesn't support listing all jobs", "jobs": []}
-
-@app.get("/api/submissions/{job_id}")
-async def get_submission(job_id: int):
-    """Get specific job from Tier-3 using their /api/job/{job_id} endpoint"""
-    async with httpx.AsyncClient() as client:
-        # Use the CORRECT path from Tier-3's OpenAPI spec
-        response = await client.get(f"{TIER3_URL}/api/job/{job_id}")
-        return response.json()
-
-@app.post("/api/submit")
-async def submit_job(request: Request):
-    """Submit job to Tier-3"""
-    data = await request.json()
-    # Tier-3 likely expects this at a specific endpoint - check which one accepts POST
-    # Based on OpenAPI, possible endpoints: /process-envelope or /api/process-submission
-    async with httpx.AsyncClient() as client:
-        # Try the process-envelope endpoint first
-        response = await client.post(f"{TIER3_URL}/process-envelope", json={
-            "id": f"job-{data.get('job_id', 'new')}",
-            "timestamp": datetime.now().timestamp(),
-            "payload": data,
-            "schema_version": "1.0",
-            "orchestration_policy": "standard",
-            "signature": "tier4-signature"
-        })
-        return response.json()
-
-# Add debug endpoints to diagnose the issue
+# Debug endpoints
 @app.get("/debug/tier3-url")
 async def debug_tier3_url():
     """Debug endpoint to check TIER3_URL value"""
     return {
-        "TIER3_URL": os.getenv("TIER3_URL", "NOT SET"),
-        "TIER3_URL_from_env": TIER3_URL
+        "TIER3_URL_env": os.getenv("TIER3_URL", "NOT SET"),
+        "TIER3_URL_var": TIER3_URL
     }
 
 @app.get("/debug/test-tier3-connection")
@@ -249,18 +77,28 @@ async def debug_tier3_connection():
             "error_type": type(e).__name__
         }
 
-# Add error handling to the job endpoint
+@app.get("/debug/routes")
+async def list_routes():
+    """List all registered routes"""
+    routes = []
+    for route in app.routes:
+        routes.append({
+            "path": route.path,
+            "name": route.name,
+            "methods": list(route.methods) if hasattr(route, 'methods') else []
+        })
+    return {"routes": routes}
+
+# Job endpoints - SINGLE CORRECT DEFINITION
 @app.get("/api/submissions/{job_id}")
 async def get_submission(job_id: int):
-    """Get specific job from Tier-3 with better error handling"""
+    """Get specific job from Tier-3 using their /api/job/{job_id} endpoint"""
     try:
-        # Log what we're trying to do
         print(f"Fetching job {job_id} from {TIER3_URL}/api/job/{job_id}")
         
         async with httpx.AsyncClient() as client:
             response = await client.get(f"{TIER3_URL}/api/job/{job_id}", timeout=10.0)
             
-            # Log the response
             print(f"Response status: {response.status_code}")
             print(f"Response body: {response.text}")
             
@@ -282,15 +120,114 @@ async def get_submission(job_id: int):
         print(f"Unexpected error: {e}")
         return {"error": f"Internal error: {str(e)}"}, 500
 
-# Add endpoint to list all routes
-@app.get("/debug/routes")
-async def list_routes():
-    """List all registered routes"""
-    routes = []
-    for route in app.routes:
-        routes.append({
-            "path": route.path,
-            "name": route.name,
-            "methods": list(route.methods) if hasattr(route, 'methods') else []
-        })
-    return {"routes": routes}
+@app.post("/api/submit")
+async def submit_job(request: Request):
+    """Submit job to Tier-3"""
+    try:
+        data = await request.json()
+        
+        async with httpx.AsyncClient() as client:
+            # Use the process-envelope endpoint
+            response = await client.post(f"{TIER3_URL}/process-envelope", json={
+                "id": f"job-{data.get('job_id', int(datetime.now().timestamp()))}",
+                "timestamp": datetime.now().timestamp(),
+                "payload": data,
+                "schema_version": "1.0",
+                "orchestration_policy": "standard",
+                "signature": "tier4-signature"
+            }, timeout=10.0)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {
+                    "error": f"Tier-3 returned {response.status_code}",
+                    "details": response.text
+                }, response.status_code
+                
+    except Exception as e:
+        print(f"Error submitting job: {e}")
+        return {"error": str(e)}, 500
+
+# Process envelope endpoints (original functionality)
+@app.post("/process-envelope")
+async def process_envelope(envelope: Envelope):
+    """Process a single envelope by forwarding to Tier-3"""
+    print(f"Tier-4 received envelope: {envelope.id}")
+    print(f"Processing envelope: {envelope.id}")
+    print(f"Policy: {envelope.orchestration_policy}")
+    
+    try:
+        # Forward to Tier-3
+        async with httpx.AsyncClient() as client:
+            response = await client.post(f"{TIER3_URL}/process-envelope", json=envelope.dict(), timeout=10.0)
+            return response.json()
+    except Exception as e:
+        print(f"Error forwarding to Tier-3: {str(e)}")
+        return {
+            "decision": "ERROR",
+            "confidence": 0,
+            "risk_factors": [f"Error: {str(e)}"],
+            "appeal_text": None,
+            "job_id": envelope.payload.get("job_id")
+        }
+
+@app.post("/process-batch")
+async def process_batch(batch: BatchEnvelope):
+    """Process multiple envelopes in batch"""
+    print(f"Tier-4 received batch of {len(batch.envelopes)} envelopes")
+    
+    results = []
+    for envelope in batch.envelopes:
+        result = await process_envelope(envelope)
+        results.append(result)
+    
+    return {"results": results}
+
+@app.post("/test-envelope")
+async def test_envelope(request: Request):
+    """Create a test envelope for development"""
+    data = await request.json()
+    
+    # Create a test envelope
+    test_envelope = {
+        "id": f"test-{datetime.now().timestamp()}",
+        "timestamp": datetime.now().timestamp(),
+        "payload": {
+            "job_id": data.get("job_id", 999),
+            "metadata": {
+                "source": "tier4_test",
+                "test": True
+            }
+        },
+        "schema_version": "1.0",
+        "orchestration_policy": "standard",
+        "signature": "tier4-test-signature",
+        "metadata": {"test": True}
+    }
+    
+    # Process it
+    return await process_envelope(Envelope(**test_envelope))
+
+# Root endpoint
+@app.get("/")
+async def root():
+    return {
+        "status": "Tier-4 is running",
+        "version": "2.0.0",
+        "endpoints": [
+            "/health",
+            "/process-envelope",
+            "/process-batch",
+            "/test-envelope",
+            "/api/submissions/{job_id}",
+            "/api/submit",
+            "/debug/tier3-url",
+            "/debug/test-tier3-connection",
+            "/debug/routes",
+            "/docs"
+        ]
+    }
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
