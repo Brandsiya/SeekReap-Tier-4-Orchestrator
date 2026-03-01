@@ -1,3 +1,4 @@
+import httpx
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -220,3 +221,63 @@ async def submit_job(request: Request):
             "signature": "tier4-signature"
         })
         return response.json()
+
+# Add debug endpoints to diagnose the issue
+@app.get("/debug/tier3-url")
+async def debug_tier3_url():
+    """Debug endpoint to check TIER3_URL value"""
+    return {
+        "TIER3_URL": os.getenv("TIER3_URL", "NOT SET"),
+        "TIER3_URL_from_env": TIER3_URL
+    }
+
+@app.get("/debug/test-tier3-connection")
+async def debug_tier3_connection():
+    """Test connection to Tier-3"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{TIER3_URL}/health", timeout=5.0)
+            return {
+                "status": "connected",
+                "tier3_status_code": response.status_code,
+                "tier3_response": response.text
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+
+# Add error handling to the job endpoint
+@app.get("/api/submissions/{job_id}")
+async def get_submission(job_id: int):
+    """Get specific job from Tier-3 with better error handling"""
+    try:
+        # Log what we're trying to do
+        print(f"Fetching job {job_id} from {TIER3_URL}/api/job/{job_id}")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{TIER3_URL}/api/job/{job_id}", timeout=10.0)
+            
+            # Log the response
+            print(f"Response status: {response.status_code}")
+            print(f"Response body: {response.text}")
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {
+                    "error": f"Tier-3 returned {response.status_code}",
+                    "details": response.text
+                }, response.status_code
+                
+    except httpx.ConnectError as e:
+        print(f"Connection error to Tier-3: {e}")
+        return {"error": f"Cannot connect to Tier-3: {str(e)}"}, 503
+    except httpx.TimeoutException as e:
+        print(f"Timeout connecting to Tier-3: {e}")
+        return {"error": "Timeout connecting to Tier-3"}, 504
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return {"error": f"Internal error: {str(e)}"}, 500
