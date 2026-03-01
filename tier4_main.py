@@ -676,3 +676,60 @@ async def submit_job_working(request: Request):
     except Exception as e:
         print(f"Error: {e}")
         return {"error": str(e)}, 500
+
+# THE FINAL WORKING ENDPOINT - Matches Tier-3's expected format
+@app.post("/api/submit-final-v2")
+async def submit_job_final_v2(request: Request):
+    """Submit job with the exact format Tier-3 expects"""
+    try:
+        data = await request.json()
+        
+        # Create envelope with job data at TOP level, not wrapped
+        envelope = {
+            "id": f"job-{int(datetime.now().timestamp())}",
+            "timestamp": datetime.now().timestamp(),
+            "payload": {
+                "job_id": int(datetime.now().timestamp()),  # Generate a unique ID
+                "status": "pending",
+                "created_at": datetime.now().isoformat(),
+                "completed_at": None,
+                "failure_reason": None,
+                "params": {
+                    "url": data.get("url", ""),
+                    "creator_id": data.get("creator_id", 1)
+                },
+                "job_type": data.get("job_type", "url")
+            },
+            "schema_version": "1.0",
+            "orchestration_policy": "standard",
+            "signature": "tier4-signature",
+            "metadata": {
+                "source": "tier4-frontend",
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+        
+        print(f"Sending final envelope: {envelope}")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{TIER3_URL}/process-envelope",
+                json=envelope,
+                timeout=10.0
+            )
+            
+            print(f"Status: {response.status_code}")
+            print(f"Response: {response.text}")
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {
+                    "error": f"Tier-3 returned {response.status_code}",
+                    "details": response.text,
+                    "envelope_sent": envelope
+                }, response.status_code
+                
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"error": str(e)}, 500
