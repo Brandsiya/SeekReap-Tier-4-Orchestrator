@@ -41,3 +41,4 @@ pipelines/reports/*.pdf
 
 # Database (if local)
 seekreap-tier4-db/*.db
+node_modules/
