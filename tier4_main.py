@@ -281,3 +281,16 @@ async def get_submission(job_id: int):
     except Exception as e:
         print(f"Unexpected error: {e}")
         return {"error": f"Internal error: {str(e)}"}, 500
+
+# Add endpoint to list all routes
+@app.get("/debug/routes")
+async def list_routes():
+    """List all registered routes"""
+    routes = []
+    for route in app.routes:
+        routes.append({
+            "path": route.path,
+            "name": route.name,
+            "methods": list(route.methods) if hasattr(route, 'methods') else []
+        })
+    return {"routes": routes}
