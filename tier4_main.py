@@ -596,3 +596,34 @@ async def submit_job_v7(request: Request):
     except Exception as e:
         print(f"Error: {e}")
         return {"error": str(e)}, 500
+
+# The working endpoint - using /api/process-submission
+@app.post("/api/submit-final")
+async def submit_job_final(request: Request):
+    """Submit job using Tier-3's dedicated submission endpoint"""
+    try:
+        data = await request.json()
+        
+        # Simple submission - no envelope needed!
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{TIER3_URL}/api/process-submission",
+                json=data,
+                timeout=10.0
+            )
+            
+            print(f"Status: {response.status_code}")
+            print(f"Response: {response.text}")
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {
+                    "error": f"Tier-3 returned {response.status_code}",
+                    "details": response.text,
+                    "data_sent": data
+                }, response.status_code
+                
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"error": str(e)}, 500
