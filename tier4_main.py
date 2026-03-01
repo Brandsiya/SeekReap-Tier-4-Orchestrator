@@ -391,3 +391,67 @@ async def submit_job_v4(request: Request):
     except Exception as e:
         print(f"Error: {e}")
         return {"error": str(e)}, 500
+
+# Exact envelope format from OpenAPI spec
+@app.post("/api/submit-v5")
+async def submit_job_v5(request: Request):
+    """Submit job with exact envelope format from OpenAPI spec"""
+    try:
+        data = await request.json()
+        
+        # Create envelope matching the spec EXACTLY
+        envelope = {
+            "id": f"job-{int(datetime.now().timestamp())}",
+            "timestamp": datetime.now().timestamp(),
+            "payload": {
+                "job_data": data  # Wrap the data in a job_data field
+            },
+            "schema_version": "1.0",
+            "orchestration_policy": "standard",
+            "signature": "tier4-signature",
+            "metadata": {
+                "source": "tier4",
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+        
+        print(f"Sending envelope: {envelope}")
+        
+        async with httpx.AsyncClient() as client:
+            # Try both endpoints
+            endpoints = [
+                f"{TIER3_URL}/process-envelope",
+                f"{TIER3_URL}/api/process-submission"
+            ]
+            
+            results = {}
+            for endpoint in endpoints:
+                try:
+                    response = await client.post(
+                        endpoint,
+                        json=envelope,
+                        timeout=10.0
+                    )
+                    results[endpoint] = {
+                        "status": response.status_code,
+                        "body": response.text
+                    }
+                    
+                    if response.status_code == 200:
+                        return {
+                            "success": True,
+                            "endpoint": endpoint,
+                            "data": response.json()
+                        }
+                except Exception as e:
+                    results[endpoint] = {"error": str(e)}
+            
+            return {
+                "success": False,
+                "envelope_sent": envelope,
+                "results": results
+            }, 500
+                
+    except Exception as e:
+        print(f"Error: {e}")
+        return {"error": str(e)}, 500
