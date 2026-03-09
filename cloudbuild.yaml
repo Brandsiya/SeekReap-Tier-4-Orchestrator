@@ -19,6 +19,8 @@ steps:
       - '--region'
       - 'us-central1'
       - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'DATABASE_URL=postgresql://neondb_owner:npg_yX7aHMwIqQC4@ep-rapid-base-ai27r1sa-pooler.c-4.us-east-1.aws.neon.tech:5432/seekreap_neon_db?sslmode=require,WORKER_URL=https://seekreap-tier3-tif2gmgi4q-uc.a.run.app,TIER5_URL=https://seekreap-worker-tif2gmgi4q-uc.a.run.app'
 
 images:
   - 'gcr.io/$PROJECT_ID/seekreap-tier4:$COMMIT_SHA'
