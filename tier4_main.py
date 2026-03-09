@@ -174,8 +174,8 @@ def submit():
         conn = _get_db()
         cur  = conn.cursor()
         cur.execute(
-            "INSERT INTO submissions (creator_id, content_hash, status, submitted_at) "
-            "VALUES (%s, %s, 'QUEUED', NOW()) RETURNING id",
+            "INSERT INTO submissions (creator_id, content_hash, content_type, status, submitted_at) "
+            "VALUES (%s, %s, 'video', 'QUEUED', NOW()) RETURNING id",
             (creator_id, content_hash),
         )
         submission_id = str(cur.fetchone()[0])
