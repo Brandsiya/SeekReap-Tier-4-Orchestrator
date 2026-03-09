@@ -174,7 +174,7 @@ def submit():
         conn = _get_db()
         cur  = conn.cursor()
         cur.execute(
-            "INSERT INTO submissions (creator_id, content_hash, status, created_at) "
+            "INSERT INTO submissions (creator_id, content_hash, status, submitted_at) "
             "VALUES (%s, %s, 'QUEUED', NOW()) RETURNING id",
             (creator_id, content_hash),
         )
@@ -225,7 +225,7 @@ def job_update():
         conn = _get_db()
         cur  = conn.cursor()
         cur.execute(
-            "UPDATE submissions SET status = %s, updated_at = NOW() WHERE id = %s",
+            "UPDATE submissions SET status = %s, completed_at = NOW() WHERE id = %s",
             (status, submission_id),
         )
         rows = cur.rowcount
