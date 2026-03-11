@@ -173,16 +173,18 @@ def submit():
     try:
         conn = _get_db()
         cur  = conn.cursor()
-        # Upsert creator so FK constraint never fails for new Firebase users
+        # Convert Firebase UID (string) to deterministic UUID for FK compatibility
+        import uuid as _uuid
+        creator_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, creator_id))
         cur.execute(
-            "INSERT INTO creators (id, email, display_name) "
+            "INSERT INTO creators (id, email, name) "
             "VALUES (%s, %s, %s) ON CONFLICT (id) DO NOTHING",
-            (creator_id, data.get('email', ''), data.get('display_name', '')),
+            (creator_uuid, data.get('email', ''), data.get('display_name', data.get('email', ''))),
         )
         cur.execute(
             "INSERT INTO submissions (creator_id, content_hash, content_type, status, submitted_at) "
             "VALUES (%s, %s, 'video', 'QUEUED', NOW()) RETURNING id",
-            (creator_id, content_hash),
+            (creator_uuid, content_hash),
         )
         submission_id = str(cur.fetchone()[0])
         conn.commit()
