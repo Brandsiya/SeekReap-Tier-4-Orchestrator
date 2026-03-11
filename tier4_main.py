@@ -216,6 +216,72 @@ def submit():
     }), 202
 
 
+@app.route('/api/status/<submission_id>', methods=['GET'])
+def get_submission_status(submission_id):
+    """Poll endpoint for loader.html — returns current status of a submission."""
+    try:
+        conn = _get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT id, status, overall_risk_score, risk_level, flags_count, "
+            "completed_at, submitted_at FROM submissions WHERE id = %s",
+            (submission_id,)
+        )
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if not row:
+            return jsonify({"error": "not found"}), 404
+        return jsonify({
+            "submission_id": str(row[0]),
+            "status":        row[1],
+            "overall_risk_score": float(row[2]) if row[2] is not None else None,
+            "risk_level":    row[3],
+            "flags_count":   row[4],
+            "completed_at":  row[5].isoformat() if row[5] else None,
+            "submitted_at":  row[6].isoformat() if row[6] else None,
+        })
+    except Exception as e:
+        logger.error("Status query failed: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/results/<submission_id>', methods=['GET'])
+def get_submission_results(submission_id):
+    """Full results for verification_report.html."""
+    try:
+        conn = _get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT id, creator_id, status, content_url, content_hash, content_type, "
+            "overall_risk_score, risk_level, flags_count, metadata, "
+            "submitted_at, completed_at, scan_tier "
+            "FROM submissions WHERE id = %s",
+            (submission_id,)
+        )
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if not row:
+            return jsonify({"error": "not found"}), 404
+        return jsonify({
+            "submission_id":       str(row[0]),
+            "creator_id":          str(row[1]),
+            "status":              row[2],
+            "content_url":         row[3],
+            "content_hash":        row[4],
+            "content_type":        row[5],
+            "overall_risk_score":  float(row[6]) if row[6] is not None else None,
+            "risk_level":          row[7],
+            "flags_count":         row[8],
+            "metadata":            row[9] or {},
+            "submitted_at":        row[10].isoformat() if row[10] else None,
+            "completed_at":        row[11].isoformat() if row[11] else None,
+            "scan_tier":           row[12],
+        })
+    except Exception as e:
+        logger.error("Results query failed: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/job-update', methods=['POST'])
 def job_update():
     """
