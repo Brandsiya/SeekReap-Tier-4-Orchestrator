@@ -198,7 +198,7 @@ def submit():
     # 2. Forward to Tier-3 for analysis + write results back to submissions table
     tier3_result = None
     try:
-        resp = _call_tier3("/api/process-submission", method="POST",
+        resp = _call_tier3("/api/analyze", method="POST",
                            json_body={
                                "job_id":      submission_id,
                                "content_id":  content_hash,
