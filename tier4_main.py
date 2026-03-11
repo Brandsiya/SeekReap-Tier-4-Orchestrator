@@ -195,13 +195,39 @@ def submit():
         logger.error("DB insert failed: %s", e)
         return jsonify({"error": "Database error", "detail": str(e)}), 500
 
-    # 2. Forward to Tier-3 for analysis
+    # 2. Forward to Tier-3 for analysis + write results back to submissions table
     tier3_result = None
     try:
-        resp = _call_tier3("/analyze", method="POST",
-                           json_body={"submission_id": submission_id, "content_hash": content_hash})
+        resp = _call_tier3("/api/process-submission", method="POST",
+                           json_body={
+                               "job_id":      submission_id,
+                               "content_id":  content_hash,
+                               "job_type":    "url",
+                               "params":      {"url": data.get("content_url", ""), "content_hash": content_hash},
+                           })
         if resp.status_code == 200:
             tier3_result = resp.json()
+            analysis    = tier3_result.get("analysis", {})
+            risk_score  = analysis.get("overall_risk_score")
+            risk_level  = analysis.get("risk_level")
+            # Write Tier-3 results back into the submissions row
+            try:
+                conn2 = _get_db()
+                cur2  = conn2.cursor()
+                cur2.execute(
+                    "UPDATE submissions SET status=%s, overall_risk_score=%s, risk_level=%s, "
+                    "completed_at=NOW() WHERE id=%s",
+                    ("COMPLETED", risk_score, risk_level, submission_id)
+                )
+                conn2.commit()
+                cur2.close()
+                conn2.close()
+                logger.info("Tier-3 results written back for %s: score=%s level=%s",
+                            submission_id, risk_score, risk_level)
+            except Exception as db_err:
+                logger.error("Failed to write Tier-3 results to DB: %s", db_err)
+        else:
+            logger.warning("Tier-3 returned %s for %s", resp.status_code, submission_id)
     except Exception as e:
         logger.error("Tier-3 call failed for %s: %s", submission_id, e)
 
