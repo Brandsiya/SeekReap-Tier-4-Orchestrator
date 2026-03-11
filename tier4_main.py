@@ -176,10 +176,12 @@ def submit():
         # Convert Firebase UID (string) to deterministic UUID for FK compatibility
         import uuid as _uuid
         creator_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, creator_id))
+        _email = data.get('email') or f"creator-{creator_uuid}@seekreap.internal"
+        _name  = data.get('display_name') or data.get('email') or ''
         cur.execute(
             "INSERT INTO creators (id, email, name) "
-            "VALUES (%s, %s, %s) ON CONFLICT (id) DO NOTHING",
-            (creator_uuid, data.get('email', ''), data.get('display_name', data.get('email', ''))),
+            "VALUES (%s, %s, %s) ON CONFLICT (id) DO UPDATE SET last_active = NOW()",
+            (creator_uuid, _email, _name),
         )
         cur.execute(
             "INSERT INTO submissions (creator_id, content_hash, content_type, status, submitted_at) "
