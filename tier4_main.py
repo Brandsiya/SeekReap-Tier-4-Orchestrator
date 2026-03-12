@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import time
@@ -216,10 +217,15 @@ def submit():
             try:
                 conn2 = _get_db()
                 cur2  = conn2.cursor()
+                _meta_json = json.dumps({
+                    "title":   analysis.get("metadata", {}).get("title", ""),
+                    "channel": analysis.get("metadata", {}).get("channel", ""),
+                    "url":     analysis.get("metadata", {}).get("url", ""),
+                })
                 cur2.execute(
                     "UPDATE submissions SET status=%s, overall_risk_score=%s, risk_level=%s, "
-                    "completed_at=NOW() WHERE id=%s",
-                    ("COMPLETED", risk_score, risk_level, submission_id)
+                    "completed_at=NOW(), metadata=%s WHERE id=%s",
+                    ("COMPLETED", risk_score, risk_level, _meta_json, submission_id)
                 )
                 conn2.commit()
                 cur2.close()
