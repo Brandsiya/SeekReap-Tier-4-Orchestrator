@@ -255,35 +255,6 @@ def submit():
     }), 202
 
 
-@app.route('/api/status/<submission_id>', methods=['GET'])
-def get_submission_status(submission_id):
-    """Poll endpoint for loader.html — returns current status of a submission."""
-    try:
-        conn = _get_db()
-        cur  = conn.cursor()
-        cur.execute(
-            "SELECT id, status, overall_risk_score, risk_level, flags_count, "
-            "completed_at, submitted_at FROM submissions WHERE id = %s",
-            (submission_id,)
-        )
-        row = cur.fetchone()
-        cur.close(); conn.close()
-        if not row:
-            return jsonify({"error": "not found"}), 404
-        return jsonify({
-            "submission_id": str(row[0]),
-            "status":        row[1],
-            "overall_risk_score": float(row[2]) if row[2] is not None else None,
-            "risk_level":    row[3],
-            "flags_count":   row[4],
-            "completed_at":  row[5].isoformat() if row[5] else None,
-            "submitted_at":  row[6].isoformat() if row[6] else None,
-        })
-    except Exception as e:
-        logger.error("Status query failed: %s", e)
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route('/api/results/<submission_id>', methods=['GET'])
 def get_submission_results(submission_id):
     """Full results for verification_report.html."""
@@ -352,6 +323,7 @@ def job_update():
     except Exception as e:
         logger.error("DB update failed: %s", e)
         return jsonify({"error": str(e)}), 500
+
 
 
 
