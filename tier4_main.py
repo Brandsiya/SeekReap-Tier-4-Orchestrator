@@ -185,9 +185,9 @@ def submit():
             (creator_uuid, _email, _name),
         )
         cur.execute(
-            "INSERT INTO submissions (creator_id, content_hash, content_type, status, submitted_at) "
-            "VALUES (%s, %s, 'video', 'QUEUED', NOW()) RETURNING id",
-            (creator_uuid, content_hash),
+            "INSERT INTO submissions (creator_id, content_hash, content_type, content_url, status, submitted_at) "
+            "VALUES (%s, %s, 'video', %s, 'QUEUED', NOW()) RETURNING id",
+            (creator_uuid, content_hash, data.get('content_url', '')),
         )
         submission_id = str(cur.fetchone()[0])
         conn.commit()
