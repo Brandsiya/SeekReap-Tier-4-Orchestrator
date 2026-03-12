@@ -354,5 +354,54 @@ def job_update():
         return jsonify({"error": str(e)}), 500
 
 
+
+@app.route('/api/status/<submission_id>', methods=['GET', 'OPTIONS'])
+def get_submission_status(submission_id):
+    if request.method == 'OPTIONS':
+        resp = make_response('', 204)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+        return resp
+    try:
+        import psycopg2 as _pg2
+        conn = _pg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT s.status, s.overall_risk_score, s.risk_level,
+                   s.content_url, s.completed_at, s.metadata,
+                   f.visual_phash, f.audio_fingerprint IS NOT NULL,
+                   f.visual_similarity_score, f.thumbnail_url
+            FROM submissions s
+            LEFT JOIN fingerprints f ON f.submission_id = s.id
+            WHERE s.id = %s
+        """, (submission_id,))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if not row:
+            return jsonify({"error": "not found"}), 404
+        import json as _json
+        meta = row[5] or {}
+        if isinstance(meta, str):
+            try: meta = _json.loads(meta)
+            except: meta = {}
+        resp = jsonify({
+            "submission_id":  submission_id,
+            "status":         row[0] or "QUEUED",
+            "risk_score":     float(row[1]) if row[1] is not None else None,
+            "risk_level":     row[2] or "",
+            "content_url":    row[3] or "",
+            "completed_at":   row[4].isoformat() if row[4] else None,
+            "title":          meta.get("title", ""),
+            "channel":        meta.get("channel", ""),
+            "visual_phash":   row[6],
+            "audio_stored":   bool(row[7]),
+            "visual_similarity_score": float(row[8]) if row[8] is not None else None,
+            "thumbnail_url":  row[9],
+        })
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp, 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT, debug=False)
