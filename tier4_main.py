@@ -370,7 +370,7 @@ def get_submission_status(submission_id):
             SELECT s.status, s.overall_risk_score, s.risk_level,
                    s.content_url, s.completed_at, s.metadata,
                    f.visual_phash, f.audio_fingerprint IS NOT NULL,
-                   f.visual_similarity_score, f.thumbnail_url
+                   f.thumbnail_url
             FROM submissions s
             LEFT JOIN fingerprints f ON f.submission_id = s.id
             WHERE s.id = %s
@@ -395,8 +395,7 @@ def get_submission_status(submission_id):
             "channel":        meta.get("channel", ""),
             "visual_phash":   row[6],
             "audio_stored":   bool(row[7]),
-            "visual_similarity_score": float(row[8]) if row[8] is not None else None,
-            "thumbnail_url":  row[9],
+            "thumbnail_url":  row[8],
         })
         resp.headers['Access-Control-Allow-Origin'] = '*'
         return resp, 200
