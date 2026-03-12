@@ -206,7 +206,12 @@ def submit():
                                "job_id":      submission_id,
                                "content_id":  content_hash,
                                "job_type":    "url",
-                               "params":      {"url": data.get("content_url", ""), "content_hash": content_hash},
+                               "params":      {
+                                   "url":           data.get("content_url", ""),
+                                   "content_hash":  content_hash,
+                                   "submission_id": submission_id,
+                                   "creator_id":    str(creator_uuid),
+                               },
                            })
         if resp.status_code == 200:
             tier3_result = resp.json()
