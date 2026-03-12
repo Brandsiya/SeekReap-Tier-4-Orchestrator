@@ -6,7 +6,7 @@ import logging
 import threading
 import requests
 from datetime import datetime
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, make_response
 from flask_cors import CORS
 import psycopg2
 
