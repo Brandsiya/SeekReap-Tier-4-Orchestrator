@@ -26,21 +26,6 @@ def normalize_youtube_url(url):
         return f'https://www.youtube.com/watch?v={m.group(1)}'
     return url
 
-def normalize_youtube_url(url):
-    """Convert youtu.be and shorts URLs to standard watch URLs."""
-    if not url:
-        return url
-    import re
-    # youtu.be/VIDEO_ID
-    m = re.match(r'https?://youtu\.be/([a-zA-Z0-9_-]{11})', url)
-    if m:
-        return f'https://www.youtube.com/watch?v={m.group(1)}'
-    # youtube.com/shorts/VIDEO_ID
-    m = re.match(r'https?://(?:www\.)?youtube\.com/shorts/([a-zA-Z0-9_-]{11})', url)
-    if m:
-        return f'https://www.youtube.com/watch?v={m.group(1)}'
-    return url
-
 def extract_youtube_metadata(url):
     """Use yt-dlp --dump-json to get video metadata without downloading."""
     url = normalize_youtube_url(url)
