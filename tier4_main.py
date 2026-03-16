@@ -45,7 +45,12 @@ def extract_youtube_metadata(url):
             params={'id': video_id, 'part': 'snippet,contentDetails', 'key': api_key},
             timeout=10
         )
+        print(f"YT API status: {resp.status_code}")
         data = resp.json()
+        print(f"YT API response keys: {list(data.keys())}")
+        print(f"YT API items count: {len(data.get('items', []))}")
+        if 'error' in data:
+            print(f"YT API error: {data['error']}")
         if not data.get('items'):
             return {}
         item = data['items'][0]
