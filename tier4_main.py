@@ -16,7 +16,6 @@ def normalize_youtube_url(url):
     """Convert youtu.be and shorts URLs to standard watch URLs."""
     if not url:
         return url
-    import re
     # youtu.be/VIDEO_ID
     m = re.match(r'https?://youtu\.be/([a-zA-Z0-9_-]{11})', url)
     if m:
