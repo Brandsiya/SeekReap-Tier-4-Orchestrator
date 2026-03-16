@@ -242,3 +242,11 @@ def health():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8081)
+
+@app.get("/debug/env")
+def debug_env():
+    return {
+        "has_youtube_key": bool(os.environ.get("YOUTUBE_API_KEY")),
+        "has_db": bool(os.environ.get("DATABASE_URL")),
+        "key_prefix": os.environ.get("YOUTUBE_API_KEY", "")[:8]
+    }
