@@ -1,0 +1,133 @@
+from flask import Flask, request, jsonify
+import uuid
+import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from dotenv import load_dotenv
+from datetime import datetime
+
+load_dotenv()
+app = Flask(__name__)
+
+def get_db():
+    return psycopg2.connect(os.environ.get('DATABASE_URL'))
+
+def insert_submission(data):
+    submission_id = str(uuid.uuid4())
+    content_hash = data.get('content_hash', 'test')
+    content_type = data.get('content_type', 'unknown')
+    
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        # Insert into submissions table
+        cur.execute("""
+            INSERT INTO submissions (id, creator_id, content_hash, content_type, status)
+            VALUES (%s, %s, %s, %s, 'QUEUED')
+            RETURNING id
+        """, (submission_id, data.get('creator_id'), content_hash, content_type))
+        
+        # Insert into job_queue table
+        cur.execute("""
+            INSERT INTO job_queue (submission_id, content_hash, content_type, status)
+            VALUES (%s, %s, %s, %s, 'QUEUED')
+        """, (submission_id, data.get('creator_id'), content_hash, content_type))
+        
+        conn.commit()
+        print(f"Created submission {submission_id} and queued job")
+    except Exception as e:
+        print(f"DB insert error: {e}")
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+    return submission_id
+
+@app.post("/api/submit")
+def submit():
+    try:
+        data = request.get_json()
+        submission_id = insert_submission(data)
+        return jsonify({"submission_id": submission_id, "status": "QUEUED"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.post("/api/finalize")
+def finalize():
+    data = request.get_json()
+    submission_id = data["submission_id"]
+    analysis = data["analysis"]
+
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        # Update submissions table
+        cur.execute("""
+            UPDATE submissions
+            SET status = 'COMPLETED',
+                risk_score = %s,
+                risk_level = %s
+            WHERE id = %s
+            RETURNING id
+        """, (analysis.get('risk_score'), analysis.get('risk_level'), submission_id))
+        
+        # Update job_queue status
+        cur.execute("""
+            UPDATE job_queue
+            SET status = 'COMPLETED',
+                updated_at = NOW()
+            WHERE submission_id = %s
+        """, (submission_id,))
+        
+        conn.commit()
+        updated = cur.fetchone() is not None
+    except Exception as e:
+        print(f"DB update error: {e}")
+        conn.rollback()
+        updated = False
+    finally:
+        cur.close()
+        conn.close()
+
+    if updated:
+        return jsonify({"status": "updated"})
+    else:
+        return jsonify({"error": "submission not found"}), 404
+
+@app.get("/api/status/<submission_id>")
+def status(submission_id):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT s.id, s.status, s.risk_score, s.risk_level, 
+                   j.status as queue_status, j.attempts
+            FROM submissions s
+            LEFT JOIN job_queue j ON s.id = j.submission_id
+            WHERE s.id = %s
+        """, (submission_id,))
+        result = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    
+    if result:
+        return jsonify(dict(result))
+    return jsonify({"error": "not found"}), 404
+
+@app.get("/health")
+def health():
+    # Test database connection
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.close()
+        conn.close()
+        return {"status": "ok", "database": "connected"}
+    except Exception as e:
+        return {"status": "error", "database": str(e)}, 500
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8081)

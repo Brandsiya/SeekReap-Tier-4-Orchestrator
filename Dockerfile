@@ -11,8 +11,8 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY *.py .
+# Copy all Python files - FIXED SYNTAX
+COPY *.py ./
 
-# Run the application
+# Run with gunicorn
 CMD exec gunicorn --bind :8080 --workers 1 --threads 8 --timeout 0 tier4_main:app

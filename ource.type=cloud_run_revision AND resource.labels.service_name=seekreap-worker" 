@@ -1,0 +1,9 @@
+                  id                  |  status   | job_id | job_status | attempts 
+--------------------------------------+-----------+--------+------------+----------
+ 1294e6f6-285a-41d3-9161-c387440ba696 | completed |     13 | completed  |        1
+ 46ba59d6-ff4b-46ef-a4ac-b54ca10e2f3f | completed |     12 | failed     |        3
+ ac875971-71ae-41c1-b771-b3a65824232e | pending   |     11 | failed     |        3
+ 1d7e5af2-4514-4fbc-98fe-7e6e339ab0d5 | pending   |     10 | failed     |        3
+ 8f408c2d-fedf-49f5-a2ac-007719b0679a | pending   |      9 | failed     |        3
+(5 rows)
+
