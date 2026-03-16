@@ -27,30 +27,47 @@ def normalize_youtube_url(url):
     return url
 
 def extract_youtube_metadata(url):
-    """Use yt-dlp --dump-json to get video metadata without downloading."""
+    """Use YouTube Data API v3 to get video metadata."""
     url = normalize_youtube_url(url)
-    if not url or "youtube" not in url and "youtu.be" not in url:
+    if not url or 'youtube' not in url:
         return {}
     try:
-        result = subprocess.run(
-            ["yt-dlp", "--dump-json", "--no-playlist", "--skip-download",
-             "--no-write-auto-subs", "--no-write-subs", url],
-            capture_output=True, text=True, timeout=45
+        m = re.search(r'[?&]v=([a-zA-Z0-9_-]{11})', url)
+        if not m:
+            return {}
+        video_id = m.group(1)
+        api_key = os.environ.get('YOUTUBE_API_KEY', '')
+        if not api_key:
+            return {}
+        resp = requests.get(
+            'https://www.googleapis.com/youtube/v3/videos',
+            params={'id': video_id, 'part': 'snippet,contentDetails', 'key': api_key},
+            timeout=10
         )
-        if result.returncode == 0:
-            data = json.loads(result.stdout)
-            return {
-                "title": data.get("title", ""),
-                "channel": data.get("uploader") or data.get("channel", ""),
-                "duration": data.get("duration"),
-                "upload_date": data.get("upload_date", ""),
-                "thumbnail_url": data.get("thumbnail", ""),
-                "view_count": data.get("view_count"),
-                "youtube_id": data.get("id", ""),
-                "description": (data.get("description") or "")[:500],
-            }
+        data = resp.json()
+        if not data.get('items'):
+            return {}
+        item = data['items'][0]
+        snippet = item.get('snippet', {})
+        duration_iso = item.get('contentDetails', {}).get('duration', '')
+        duration_secs = None
+        dm = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration_iso)
+        if dm:
+            h, mn, s = (int(x or 0) for x in dm.groups())
+            duration_secs = h*3600 + mn*60 + s
+        thumbs = snippet.get('thumbnails', {})
+        thumb = (thumbs.get('maxres') or thumbs.get('high') or thumbs.get('default') or {}).get('url', '')
+        return {
+            'title': snippet.get('title', ''),
+            'channel': snippet.get('channelTitle', ''),
+            'duration': duration_secs,
+            'upload_date': snippet.get('publishedAt', '')[:10].replace('-', ''),
+            'thumbnail_url': thumb,
+            'youtube_id': video_id,
+            'description': snippet.get('description', '')[:500],
+        }
     except Exception as e:
-        print(f"yt-dlp error: {e}")
+        print(f'YouTube API error: {e}')
     return {}
 
 def get_or_create_creator(conn, firebase_uid, email=None, name=None):
