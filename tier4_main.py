@@ -201,7 +201,8 @@ def status(submission_id):
         cur.execute("""
             SELECT cm.matched_submission_id, cm.similarity_score,
                    cm.match_type, cm.fingerprint_version, cm.detected_at,
-                   ms.title as matched_title, ms.content_url as matched_url
+                   ms.title as matched_title, ms.content_url as matched_url,
+                   cm.severity
             FROM content_matches cm
             JOIN submissions ms ON ms.id = cm.matched_submission_id
             WHERE cm.submission_id = %s
@@ -239,6 +240,7 @@ def status(submission_id):
             "detected_at": m["detected_at"].isoformat() if m["detected_at"] else None,
             "matched_title": m["matched_title"] or "",
             "matched_url": m["matched_url"] or "",
+            "severity": m["severity"] or "medium",
         }
         for m in matches
     ]
