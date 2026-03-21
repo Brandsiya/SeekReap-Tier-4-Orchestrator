@@ -232,13 +232,13 @@ def status(submission_id):
     # Add match data
     result["matches"] = [
         {
-            "matched_submission_id": str(m[0]),
-            "similarity_score": float(m[1]),
-            "match_type": m[2],
-            "fingerprint_version": m[3],
-            "detected_at": m[4].isoformat() if m[4] else None,
-            "matched_title": m[5] or "",
-            "matched_url": m[6] or "",
+            "matched_submission_id": str(m["matched_submission_id"]),
+            "similarity_score": float(m["similarity_score"]),
+            "match_type": m["match_type"],
+            "fingerprint_version": m["fingerprint_version"],
+            "detected_at": m["detected_at"].isoformat() if m["detected_at"] else None,
+            "matched_title": m["matched_title"] or "",
+            "matched_url": m["matched_url"] or "",
         }
         for m in matches
     ]
