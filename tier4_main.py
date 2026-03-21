@@ -196,6 +196,19 @@ def status(submission_id):
             WHERE s.id = %s
         """, (submission_id,))
         row = cur.fetchone()
+
+        # Fetch matches
+        cur.execute("""
+            SELECT cm.matched_submission_id, cm.similarity_score,
+                   cm.match_type, cm.fingerprint_version, cm.detected_at,
+                   ms.title as matched_title, ms.content_url as matched_url
+            FROM content_matches cm
+            JOIN submissions ms ON ms.id = cm.matched_submission_id
+            WHERE cm.submission_id = %s
+            ORDER BY cm.similarity_score DESC
+            LIMIT 10
+        """, (submission_id,))
+        matches = cur.fetchall()
     finally:
         cur.close()
         conn.close()
@@ -215,6 +228,21 @@ def status(submission_id):
     result["yt_upload_date"] = meta.get("upload_date", "")
     result["yt_thumbnail"] = meta.get("thumbnail_url", "") or result.get("content_preview_url", "")
     result["yt_id"] = meta.get("youtube_id", "")
+
+    # Add match data
+    result["matches"] = [
+        {
+            "matched_submission_id": str(m[0]),
+            "similarity_score": float(m[1]),
+            "match_type": m[2],
+            "fingerprint_version": m[3],
+            "detected_at": m[4].isoformat() if m[4] else None,
+            "matched_title": m[5] or "",
+            "matched_url": m[6] or "",
+        }
+        for m in matches
+    ]
+    result["has_match"] = len(result["matches"]) > 0
     return jsonify(result)
 
 @app.get("/health")
