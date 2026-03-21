@@ -27,7 +27,7 @@ def normalize_youtube_url(url):
     return url
 
 def extract_youtube_metadata(url):
-    """Use YouTube Data API v3 to get video metadata."""
+    """Fetch YouTube metadata via oEmbed (no API key needed)."""
     url = normalize_youtube_url(url)
     if not url or 'youtube' not in url:
         return {}
@@ -36,43 +36,24 @@ def extract_youtube_metadata(url):
         if not m:
             return {}
         video_id = m.group(1)
-        api_key = os.environ.get('YOUTUBE_API_KEY', '')
-        if not api_key:
+        oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        resp = requests.get(oembed_url, timeout=10)
+        if resp.status_code != 200:
+            print(f"oEmbed status: {resp.status_code}")
             return {}
-        resp = requests.get(
-            'https://www.googleapis.com/youtube/v3/videos',
-            params={'id': video_id, 'part': 'snippet,contentDetails', 'key': api_key},
-            timeout=10
-        )
-        print(f"YT API status: {resp.status_code}")
         data = resp.json()
-        print(f"YT API response keys: {list(data.keys())}")
-        print(f"YT API items count: {len(data.get('items', []))}")
-        if 'error' in data:
-            print(f"YT API error: {data['error']}")
-        if not data.get('items'):
-            return {}
-        item = data['items'][0]
-        snippet = item.get('snippet', {})
-        duration_iso = item.get('contentDetails', {}).get('duration', '')
-        duration_secs = None
-        dm = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration_iso)
-        if dm:
-            h, mn, s = (int(x or 0) for x in dm.groups())
-            duration_secs = h*3600 + mn*60 + s
-        thumbs = snippet.get('thumbnails', {})
-        thumb = (thumbs.get('maxres') or thumbs.get('high') or thumbs.get('default') or {}).get('url', '')
+        thumbnail_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
         return {
-            'title': snippet.get('title', ''),
-            'channel': snippet.get('channelTitle', ''),
-            'duration': duration_secs,
-            'upload_date': snippet.get('publishedAt', '')[:10].replace('-', ''),
-            'thumbnail_url': thumb,
+            'title': data.get('title', ''),
+            'channel': data.get('author_name', ''),
+            'duration': None,
+            'upload_date': '',
+            'thumbnail_url': thumbnail_url,
             'youtube_id': video_id,
-            'description': snippet.get('description', '')[:500],
+            'description': '',
         }
     except Exception as e:
-        print(f'YouTube API error: {e}')
+        print(f'YouTube oEmbed error: {e}')
     return {}
 
 def get_or_create_creator(conn, firebase_uid, email=None, name=None):
