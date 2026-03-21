@@ -119,7 +119,7 @@ def insert_submission(data, creator_uuid):
         conn.commit()
         print(f"Created submission {submission_id} title={title!r}")
         cur2 = conn.cursor()
-        cur2.execute("INSERT INTO job_queue (submission_id, creator_id, status, attempts) VALUES (%s, %s, %s, 0) ON CONFLICT DO NOTHING", (submission_id, creator_uuid, "pending"))
+        cur2.execute("INSERT INTO job_queue (submission_id, creator_id, content_id, job_type, status, attempts) VALUES (%s, %s, %s, %s, %s, 0) ON CONFLICT DO NOTHING", (submission_id, creator_uuid, content_url, "fingerprint", "pending"))
         conn.commit()
         cur2.close()
     except Exception as e:
