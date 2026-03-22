@@ -385,16 +385,16 @@ def latency_metrics():
         """)
         row = cur.fetchone()
         cur.execute("""
-            SELECT COUNT(*) FROM job_queue
+            SELECT COUNT(*) AS cnt FROM job_queue
             WHERE status IN ('pending', 'processing')
         """)
-        queue_depth = cur.fetchone()[0]
+        queue_depth = cur.fetchone()["cnt"]
         cur.execute("""
-            SELECT COUNT(*) FROM job_queue
+            SELECT COUNT(*) AS cnt FROM job_queue
             WHERE status = 'failed'
               AND created_at >= NOW() - INTERVAL '24 hours'
         """)
-        failed_24h = cur.fetchone()[0]
+        failed_24h = cur.fetchone()["cnt"]
         total = int(row["total_completed"] or 0)
         return jsonify({
             "latency_7d": {
