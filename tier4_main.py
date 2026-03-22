@@ -247,6 +247,64 @@ def status(submission_id):
     result["has_match"] = len(result["matches"]) > 0
     return jsonify(result)
 
+@app.get("/api/submissions")
+def list_submissions():
+    """Return recent submissions + match counts for a creator (used by dashboard)."""
+    creator_id = request.headers.get('X-Creator-ID') or request.args.get('creator_id')
+    if not creator_id:
+        return jsonify({"error": "X-Creator-ID header required"}), 400
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        # Convert Firebase UID → deterministic UUID (same logic as /api/submit)
+        import uuid as _uuid
+        try:
+            creator_uuid = str(_uuid.UUID(creator_id))
+        except ValueError:
+            creator_uuid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, creator_id))
+
+        cur.execute("""
+            SELECT s.id, s.content_url, s.content_type, s.status,
+                   s.overall_risk_score, s.risk_level,
+                   s.submitted_at, s.completed_at,
+                   s.yt_title       AS title,
+                   s.yt_channel     AS channel,
+                   s.yt_thumbnail   AS thumbnail,
+                   COUNT(cm.id)     AS match_count,
+                   MAX(cm.severity) AS max_severity
+            FROM submissions s
+            LEFT JOIN content_matches cm ON cm.submission_id = s.id
+            WHERE s.creator_id = %s
+            GROUP BY s.id
+            ORDER BY s.submitted_at DESC
+            LIMIT 50
+        """, (creator_uuid,))
+        rows = cur.fetchall()
+        submissions = []
+        for r in rows:
+            submissions.append({
+                "id":                str(r["id"]),
+                "content_url":       r["content_url"],
+                "content_type":      r["content_type"],
+                "status":            (r["status"] or "").upper(),
+                "overall_risk_score": r["overall_risk_score"],
+                "risk_level":        r["risk_level"],
+                "submitted_at":      r["submitted_at"].isoformat() if r["submitted_at"] else None,
+                "completed_at":      r["completed_at"].isoformat() if r["completed_at"] else None,
+                "title":             r["title"],
+                "channel":           r["channel"],
+                "thumbnail":         r["thumbnail"],
+                "match_count":       int(r["match_count"] or 0),
+                "max_severity":      r["max_severity"],
+            })
+        return jsonify({"submissions": submissions, "total": len(submissions)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.get("/health")
 def health():
     try:
