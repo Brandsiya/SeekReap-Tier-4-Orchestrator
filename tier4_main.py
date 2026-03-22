@@ -267,9 +267,9 @@ def list_submissions():
             SELECT s.id, s.content_url, s.content_type, s.status,
                    s.overall_risk_score, s.risk_level,
                    s.submitted_at, s.completed_at,
-                   s.yt_title       AS title,
-                   s.yt_channel     AS channel,
-                   s.yt_thumbnail   AS thumbnail,
+                   s.title,
+                   s.channel,
+                   s.thumbnail,
                    COUNT(cm.id)     AS match_count,
                    MAX(cm.severity) AS max_severity
             FROM submissions s
