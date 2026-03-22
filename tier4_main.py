@@ -395,13 +395,14 @@ def latency_metrics():
               AND created_at >= NOW() - INTERVAL '24 hours'
         """)
         failed_24h = cur.fetchone()[0]
+        total = int(row["total_completed"] or 0)
         return jsonify({
             "latency_7d": {
-                "total_completed": row["total_completed"],
-                "avg_seconds":     float(row["avg_seconds"] or 0),
-                "p95_seconds":     float(row["p95_seconds"] or 0),
-                "min_seconds":     float(row["min_seconds"] or 0),
-                "max_seconds":     float(row["max_seconds"] or 0),
+                "total_completed": total,
+                "avg_seconds":     float(row["avg_seconds"]) if row["avg_seconds"] is not None else None,
+                "p95_seconds":     float(row["p95_seconds"]) if row["p95_seconds"] is not None else None,
+                "min_seconds":     float(row["min_seconds"]) if row["min_seconds"] is not None else None,
+                "max_seconds":     float(row["max_seconds"]) if row["max_seconds"] is not None else None,
             },
             "queue_depth":  queue_depth,
             "failed_24h":   failed_24h,
