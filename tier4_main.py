@@ -92,21 +92,33 @@ def get_or_create_creator(conn, firebase_uid, email=None, name=None):
         cur.close()
 
 def insert_submission(data, creator_uuid):
-    submission_id = str(uuid.uuid4())
     content_url = data.get("content_url")
     content_hash = data.get("content_hash", "unknown")
     content_type = data.get("content_type", "video")
 
-    # Extract YouTube metadata
-    yt_meta = extract_youtube_metadata(content_url)
-    title = yt_meta.get("title") or data.get("title") or content_hash
-    channel = yt_meta.get("channel", "")
-    thumbnail_url = yt_meta.get("thumbnail_url", "")
-    metadata = {**yt_meta, **(data.get("metadata") or {})}
-
     conn = get_db()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
+        # Deduplication: return existing submission if same creator + content_hash
+        cur.execute("""
+            SELECT id, title, content_preview_url
+            FROM submissions
+            WHERE creator_id = %s AND content_hash = %s
+            ORDER BY submitted_at DESC LIMIT 1
+        """, (creator_uuid, content_hash))
+        existing = cur.fetchone()
+        if existing:
+            print(f"Dedup: returning existing submission {existing['id']} for hash {content_hash}")
+            return str(existing["id"]), existing["title"] or content_hash, "", existing["content_preview_url"] or ""
+
+        # New submission
+        submission_id = str(uuid.uuid4())
+        yt_meta = extract_youtube_metadata(content_url)
+        title = yt_meta.get("title") or data.get("title") or content_hash
+        channel = yt_meta.get("channel", "")
+        thumbnail_url = yt_meta.get("thumbnail_url", "")
+        metadata = {**yt_meta, **(data.get("metadata") or {})}
+
         cur.execute("""
             INSERT INTO submissions
                 (id, creator_id, title, description, content_hash, content_type,
@@ -118,10 +130,14 @@ def insert_submission(data, creator_uuid):
               json.dumps(metadata)))
         conn.commit()
         print(f"Created submission {submission_id} title={title!r}")
-        cur2 = conn.cursor()
-        cur2.execute("INSERT INTO job_queue (submission_id, creator_id, content_id, job_type, status, attempts) VALUES (%s, %s, %s, %s, %s, 0) ON CONFLICT DO NOTHING", (submission_id, creator_uuid, content_url, "fingerprint", "pending"))
+
+        cur.execute("""
+            INSERT INTO job_queue
+                (submission_id, creator_id, content_id, job_type, status, attempts)
+            VALUES (%s, %s, %s, %s, %s, 0)
+            ON CONFLICT DO NOTHING
+        """, (submission_id, creator_uuid, content_url, "fingerprint", "pending"))
         conn.commit()
-        cur2.close()
     except Exception as e:
         conn.rollback()
         print(f"DB insert error: {e}")
@@ -299,6 +315,31 @@ def list_submissions():
             })
         return jsonify({"submissions": submissions, "total": len(submissions)})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.post("/api/admin/recover-stuck-jobs")
+def recover_stuck_jobs():
+    """Reset jobs stuck in 'processing' for more than 10 minutes."""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE job_queue
+            SET status = 'pending', attempts = attempts + 1,
+                failure_reason = 'recovered: stuck in processing'
+            WHERE status = 'processing'
+              AND processing_started_at < NOW() - INTERVAL '10 minutes'
+            RETURNING job_id
+        """)
+        recovered = cur.fetchall()
+        conn.commit()
+        return jsonify({"recovered": len(recovered), "job_ids": [r[0] for r in recovered]})
+    except Exception as e:
+        conn.rollback()
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
