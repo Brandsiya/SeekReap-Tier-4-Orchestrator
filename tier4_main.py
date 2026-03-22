@@ -268,8 +268,8 @@ def list_submissions():
                    s.overall_risk_score, s.risk_level,
                    s.submitted_at, s.completed_at,
                    s.title,
-                   s.channel,
-                   s.thumbnail,
+                   s.content_preview_url AS thumbnail,
+                   NULL::text            AS channel,
                    COUNT(cm.id)     AS match_count,
                    MAX(cm.severity) AS max_severity
             FROM submissions s
