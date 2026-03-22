@@ -369,13 +369,13 @@ def latency_metrics():
     try:
         cur.execute("""
             SELECT
-                COUNT(*)                                                AS total_completed,
-                ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - submitted_at))))  AS avg_seconds,
+                COUNT(*)                                                            AS total_completed,
+                ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - submitted_at))))::float AS avg_seconds,
                 ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (
                     ORDER BY EXTRACT(EPOCH FROM (completed_at - submitted_at))
-                ))                                                      AS p95_seconds,
-                ROUND(MIN(EXTRACT(EPOCH FROM (completed_at - submitted_at)))) AS min_seconds,
-                ROUND(MAX(EXTRACT(EPOCH FROM (completed_at - submitted_at)))) AS max_seconds
+                ))::float                                                           AS p95_seconds,
+                ROUND(MIN(EXTRACT(EPOCH FROM (completed_at - submitted_at))))::float AS min_seconds,
+                ROUND(MAX(EXTRACT(EPOCH FROM (completed_at - submitted_at))))::float AS max_seconds
             FROM submissions
             WHERE status = 'completed'
               AND completed_at IS NOT NULL
