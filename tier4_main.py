@@ -147,6 +147,41 @@ def insert_submission(data, creator_uuid):
         conn.close()
     return submission_id, title, channel, thumbnail_url
 
+# ── Rate limiting + backpressure helpers ─────────────────────────────────────
+DAILY_QUOTA    = 50   # max submissions per creator per day
+QUEUE_CAP      = 500  # max total pending+processing before rejecting
+
+
+def check_rate_limit(creator_uuid: str) -> tuple:
+    """Returns (allowed: bool, reason: str)."""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        # 1. Global queue backpressure
+        cur.execute("""
+            SELECT COUNT(*) FROM job_queue
+            WHERE status IN ('pending', 'processing')
+        """)
+        queue_depth = cur.fetchone()[0]
+        if queue_depth >= QUEUE_CAP:
+            return False, f"System queue full ({queue_depth} jobs). Try again later."
+
+        # 2. Per-creator daily quota
+        cur.execute("""
+            SELECT COUNT(*) FROM submissions
+            WHERE creator_id = %s
+              AND submitted_at >= NOW() - INTERVAL '24 hours'
+        """, (creator_uuid,))
+        daily_count = cur.fetchone()[0]
+        if daily_count >= DAILY_QUOTA:
+            return False, f"Daily quota reached ({daily_count}/{DAILY_QUOTA} submissions). Resets in 24h."
+
+        return True, ""
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.post("/api/submit")
 def submit():
     try:
@@ -158,6 +193,11 @@ def submit():
                                                   data.get("email"), data.get("name"))
         finally:
             conn.close()
+
+        # Rate limiting + backpressure
+        allowed, reason = check_rate_limit(creator_uuid)
+        if not allowed:
+            return jsonify({"error": reason, "code": "RATE_LIMITED"}), 429
 
         submission_id, title, channel, thumbnail_url = insert_submission(data, creator_uuid)
         return jsonify({
@@ -314,6 +354,62 @@ def list_submissions():
                 "max_severity":      r["max_severity"],
             })
         return jsonify({"submissions": submissions, "total": len(submissions)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/metrics/latency")
+def latency_metrics():
+    """Return avg and p95 processing latency for completed submissions."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT
+                COUNT(*)                                                AS total_completed,
+                ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - submitted_at))))  AS avg_seconds,
+                ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (
+                    ORDER BY EXTRACT(EPOCH FROM (completed_at - submitted_at))
+                ))                                                      AS p95_seconds,
+                ROUND(MIN(EXTRACT(EPOCH FROM (completed_at - submitted_at)))) AS min_seconds,
+                ROUND(MAX(EXTRACT(EPOCH FROM (completed_at - submitted_at)))) AS max_seconds
+            FROM submissions
+            WHERE status = 'completed'
+              AND completed_at IS NOT NULL
+              AND submitted_at IS NOT NULL
+              AND completed_at > submitted_at
+              AND submitted_at >= NOW() - INTERVAL '7 days'
+        """)
+        row = cur.fetchone()
+        cur.execute("""
+            SELECT COUNT(*) FROM job_queue
+            WHERE status IN ('pending', 'processing')
+        """)
+        queue_depth = cur.fetchone()[0]
+        cur.execute("""
+            SELECT COUNT(*) FROM job_queue
+            WHERE status = 'failed'
+              AND created_at >= NOW() - INTERVAL '24 hours'
+        """)
+        failed_24h = cur.fetchone()[0]
+        return jsonify({
+            "latency_7d": {
+                "total_completed": row["total_completed"],
+                "avg_seconds":     float(row["avg_seconds"] or 0),
+                "p95_seconds":     float(row["p95_seconds"] or 0),
+                "min_seconds":     float(row["min_seconds"] or 0),
+                "max_seconds":     float(row["max_seconds"] or 0),
+            },
+            "queue_depth":  queue_depth,
+            "failed_24h":   failed_24h,
+            "quota": {
+                "daily_limit": DAILY_QUOTA,
+                "queue_cap":   QUEUE_CAP,
+            }
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
