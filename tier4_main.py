@@ -443,6 +443,44 @@ def recover_stuck_jobs():
         conn.close()
 
 
+
+@app.get("/api/verify-proof/<submission_id>")
+def verify_blockchain_proof(submission_id):
+    """Verify blockchain proof for a submission"""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    
+    try:
+        cur.execute("""
+            SELECT id, blockchain_proof, blockchain_timestamp, blockchain_verified
+            FROM submissions 
+            WHERE id = %s
+        """, (submission_id,))
+        row = cur.fetchone()
+        
+        if not row:
+            return jsonify({"verified": False, "error": "Submission not found"}), 404
+        
+        if not row.get('blockchain_proof'):
+            return jsonify({
+                "verified": False, 
+                "error": "No blockchain proof found for this submission"
+            })
+        
+        return jsonify({
+            "verified": row['blockchain_verified'],
+            "timestamp": row['blockchain_timestamp'],
+            "proof": row['blockchain_proof']
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+
 @app.get("/health")
 def health():
     try:
