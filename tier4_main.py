@@ -444,7 +444,38 @@ def recover_stuck_jobs():
 
 
 
-@app.get("/api/verify-proof/<submission_id>")
+n@app.get("/api/verify-proof/<submission_id>")
+def verify_blockchain_proof(submission_id):
+    """Return blockchain proof for a submission"""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    
+    try:
+        cur.execute("""
+            SELECT blockchain_proof, blockchain_timestamp
+            FROM submissions
+            WHERE id = %s
+        """, (submission_id,))
+        row = cur.fetchone()
+        
+        if row and row.get('blockchain_proof'):
+            proof = row['blockchain_proof']
+            return {
+                "verified": True,
+                "proof": proof,
+                "timestamp": row['blockchain_timestamp'].isoformat() if row['blockchain_timestamp'] else None
+            }
+        else:
+            return {
+                "error": "No blockchain proof found for this submission",
+                "verified": False
+            }
+            
+    except Exception as e:
+        return {"error": str(e), "verified": False}, 500
+    finally:
+        cur.close()
+        conn.close()
 def verify_blockchain_proof(submission_id):
     """Verify blockchain proof for a submission"""
     conn = get_db()
