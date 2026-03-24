@@ -444,7 +444,7 @@ def recover_stuck_jobs():
 
 
 
-n@app.get("/api/verify-proof/<submission_id>")
+@app.get("/api/verify-proof/<submission_id>")
 def verify_blockchain_proof(submission_id):
     """Return blockchain proof for a submission"""
     conn = get_db()
