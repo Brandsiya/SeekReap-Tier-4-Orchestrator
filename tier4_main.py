@@ -534,3 +534,92 @@ def debug_env():
         "has_db": bool(os.environ.get("DATABASE_URL")),
         "key_prefix": os.environ.get("YOUTUBE_API_KEY", "")[:8]
     }
+
+# ── File Upload Endpoint for Content Registration ──
+@app.post("/api/upload")
+async def upload_content(request: Request):
+    """
+    Accepts file upload, creates submission, and queues for processing.
+    Returns submission_id for tracking.
+    """
+    import uuid
+    import tempfile
+    import os
+    
+    form = await request.form()
+    file = form.get("file")
+    firebase_uid = form.get("firebase_uid")
+    email = form.get("email")
+    content_type = form.get("content_type", "file")
+    
+    if not file or not firebase_uid:
+        return jsonify({"error": "file and firebase_uid required"}), 400
+    
+    try:
+        # Generate creator UUID
+        try:
+            creator_uuid = str(uuid.UUID(firebase_uid))
+        except ValueError:
+            creator_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, firebase_uid))
+        
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as tmp:
+            content = await file.read()
+            tmp.write(content)
+            file_path = tmp.name
+        
+        # Get audio fingerprint from file
+        # We'll let Tier-5 handle this - just store file path reference
+        # For now, create submission with file reference
+        
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # Check if content already exists (by file hash)
+        import hashlib
+        file_hash = hashlib.sha256(content).hexdigest()
+        
+        cur.execute("""
+            SELECT id FROM submissions 
+            WHERE content_hash = %s AND creator_id = %s
+        """, (file_hash, creator_uuid))
+        existing = cur.fetchone()
+        
+        if existing:
+            cur.close()
+            conn.close()
+            os.unlink(file_path)
+            return jsonify({
+                "submission_id": str(existing[0]),
+                "status": "already_registered",
+                "message": "Content already registered"
+            })
+        
+        # Create submission
+        submission_id = str(uuid.uuid4())
+        cur.execute("""
+            INSERT INTO submissions 
+            (id, creator_id, content_type, content_hash, status, submitted_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+        """, (submission_id, creator_uuid, content_type, file_hash, 'pending'))
+        
+        # Create job queue entry
+        cur.execute("""
+            INSERT INTO job_queue 
+            (submission_id, creator_id, content_id, job_type, status, attempts, params)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (submission_id, creator_uuid, file_hash, 'file_processing', 'pending', 0, 
+              json.dumps({"file_path": file_path, "filename": file.filename})))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            "submission_id": submission_id,
+            "status": "pending",
+            "message": "Content registered and queued for processing"
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
