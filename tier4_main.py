@@ -19,11 +19,8 @@ def normalize_youtube_url(url):
     # youtu.be/VIDEO_ID
     m = re.match(r'https?://youtu\.be/([a-zA-Z0-9_-]{11})', url)
     if m:
-        return f'https://www.youtube.com/watch?v={m.group(1)}'
-    # youtube.com/shorts/VIDEO_ID
     m = re.match(r'https?://(?:www\.)?youtube\.com/shorts/([a-zA-Z0-9_-]{11})', url)
     if m:
-        return f'https://www.youtube.com/watch?v={m.group(1)}'
     return url
 
 def extract_youtube_metadata(url):
@@ -36,13 +33,11 @@ def extract_youtube_metadata(url):
         if not m:
             return {}
         video_id = m.group(1)
-        oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
         resp = requests.get(oembed_url, timeout=10)
         if resp.status_code != 200:
             print(f"oEmbed status: {resp.status_code}")
             return {}
         data = resp.json()
-        thumbnail_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
         return {
             'title': data.get('title', ''),
             'channel': data.get('author_name', ''),
