@@ -79,8 +79,17 @@ def submit_content():
 # ── File upload endpoint ──
 @app.post("/api/upload")
 def upload_content():
+    # DEBUG: Log everything from frontend
+    print("=== FRONTEND REQUEST DEBUG ===")
+    print(f"Form data: {request.form}")
+    print(f"Headers: {dict(request.headers)}")
+    print(f"Files: {request.files}")
+    
     file = request.files.get("file")
     firebase_uid = request.form.get("firebase_uid")
+    auth_header = request.headers.get("Authorization", "")
+    print(f"firebase_uid from form: {firebase_uid}")
+    print(f"Authorization header: {auth_header[:100] if auth_header else 'None'}")
     email = request.form.get("email")
     content_type = request.form.get("content_type", "file")
     
