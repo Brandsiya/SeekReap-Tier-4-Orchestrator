@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import psycopg2
 import psycopg2.extras
@@ -16,8 +16,6 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 import traceback
 from datetime import datetime
-
-DATABASE_URL = os.environ.get("DATABASE_URL")
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
@@ -82,20 +80,6 @@ def enqueue_job(cur, submission_id, creator_uuid, content_id, job_type, params_d
 def err(msg, code=500):
     print(f"[ERROR {code}] {msg}", flush=True)
     return jsonify({"error": str(msg)}), code
-
-
-def get_submission(cur, submission_id):
-    """Helper to fetch submission data"""
-    cur.execute("""
-        SELECT id, creator_id, content_url, content_hash, submitted_at, status
-        FROM submissions
-        WHERE id = %s
-    """, (submission_id,))
-    row = cur.fetchone()
-    if row:
-        return dict(row)
-    return None
-
 
 @app.get("/health")
 def health():
@@ -330,120 +314,38 @@ def insert_test_job():
         return err(str(e))
 
 
-
 @app.get("/verify/<submission_id>")
 def verify(submission_id):
-    """Verify a submission by ID"""
-    # Validate UUID format first
-    try:
-        uuid.UUID(submission_id)
-    except ValueError:
-        return jsonify({"verified": False, "error": "Invalid submission ID format"}), 400
-    
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         row = get_submission(cur, submission_id)
-        
+
         if not row:
-            return jsonify({"verified": False, "error": "Submission not found"}), 404
-        
+            return jsonify({"verified": False, "error": "Not found"}), 404
+
         return jsonify({
             "verified": True,
             "submission_id": submission_id,
             "creator_id": row["creator_id"],
             "content_url": row["content_url"],
             "content_hash": row["content_hash"],
-            "submitted_at": row["submitted_at"].isoformat() if row["submitted_at"] else None,
-            "status": row.get("status", "unknown")
+            "submitted_at": row["submitted_at"].isoformat() if row["submitted_at"] else None
         })
+
     finally:
         cur.close()
         conn.close()
-@app.get("/api/qrcode/<submission_id>")
-def generate_qr_code(submission_id):
-    """Generate QR code for submission verification"""
-    try:
-        uuid.UUID(submission_id)
-    except ValueError:
-        return jsonify({"error": "Invalid submission ID format"}), 400
-    try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute(
-            "SELECT id, creator_id, content_hash, submitted_at, status FROM submissions WHERE id = %s",
-            (submission_id,)
-        )
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        if not row:
-            return jsonify({"error": "Submission not found"}), 404
-        verify_url = f"https://seekreap-tier-4-dev.fly.dev/verify/{submission_id}"
-        qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=10, border=4)
-        qr.add_data(verify_url)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        img_buffer = io.BytesIO()
-        img.save(img_buffer, format="PNG")
-        img_buffer.seek(0)
-        return send_file(img_buffer, mimetype="image/png", as_attachment=False,
-                         download_name=f"qrcode_{submission_id}.png")
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.get("/api/qrcode-rich/<submission_id>")
-def generate_rich_qr_code(submission_id):
-    """Generate QR code with embedded submission metadata"""
-    try:
-        uuid.UUID(submission_id)
-    except ValueError:
-        return jsonify({"error": "Invalid submission ID format"}), 400
-    try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
-            SELECT s.id, s.creator_id, s.content_hash, s.submitted_at, s.status,
-                   s.overall_risk_score, s.risk_level, c.email as creator_email
-            FROM submissions s
-            LEFT JOIN creators c ON c.id = s.creator_id
-            WHERE s.id = %s
-        """, (submission_id,))
-        submission = cur.fetchone()
-        cur.close()
-        conn.close()
-        if not submission:
-            return jsonify({"error": "Submission not found"}), 404
-        qr_data = {
-            "type": "seekreap_verification", "version": "1.0",
-            "submission_id": submission["id"],
-            "verification_url": f"https://seekreap-tier-4-dev.fly.dev/verify/{submission_id}",
-            "certificate_url": f"https://seekreap-tier-4-dev.fly.dev/certificate/{submission_id}",
-            "submitted_at": submission["submitted_at"].isoformat() if submission["submitted_at"] else None,
-            "risk_level": submission["risk_level"] or "pending",
-            "status": submission["status"],
-            "creator_id": str(submission["creator_id"])[:8] if submission["creator_id"] else "unknown"
-        }
-        if submission.get("overall_risk_score"):
-            qr_data["risk_score"] = float(submission["overall_risk_score"])
-        qr = qrcode.QRCode(version=2, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=8, border=4)
-        qr.add_data(json.dumps(qr_data))
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        img_buffer = io.BytesIO()
-        img.save(img_buffer, format="PNG")
-        img_buffer.seek(0)
-        return send_file(img_buffer, mimetype="image/png", as_attachment=False,
-                         download_name=f"rich_qrcode_{submission_id}.png")
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+# cache-bust 1774695611
+
+
+
+
+
 @app.get("/certificate/<submission_id>")
 def certificate(submission_id):
     conn = get_db()

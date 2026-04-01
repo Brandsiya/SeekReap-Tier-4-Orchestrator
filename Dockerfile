@@ -1,18 +1,16 @@
 FROM python:3.11-slim
 
-WORKDIR /app
-
-# Install system dependencies
+# Install ffmpeg and chromaprint for audio fingerprinting
 RUN apt-get update && apt-get install -y \
-    gcc \
+    ffmpeg \
+    libchromaprint-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+WORKDIR /app
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all Python files - FIXED SYNTAX
-COPY *.py ./
+COPY tier4_main.py .
 
-# Run with gunicorn
-CMD exec gunicorn --bind :8080 --workers 1 --threads 8 --timeout 0 tier4_main:app
+CMD ["python", "tier4_main.py"]
