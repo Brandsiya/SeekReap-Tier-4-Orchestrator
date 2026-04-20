@@ -1,553 +1,873 @@
-from flask import Flask, jsonify, request, send_file
+# SeekReap Tier-4 Orchestrator
+# Build: 2026-04-15
+from flask import Flask, request, jsonify
 from flask_cors import CORS
-import psycopg2
-import psycopg2.extras
-import os
-import uuid
-import json
-import hashlib
-
-import io
-import base64
-import qrcode
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
-
-import traceback
+import uuid, os, json, psycopg2, re, requests, hashlib, random, string
+from psycopg2.extras import RealDictCursor, Json
+from dotenv import load_dotenv
 from datetime import datetime
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
+load_dotenv()
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=[
+    "https://seekreap-backend-dev.fly.dev",
+    "http://localhost:3000",
+    "http://localhost:8080",
+])
 
+DAILY_QUOTA = 50
+QUEUE_CAP   = 500
+VALID_PLANS = {"free", "creator", "studio", "payg"}
 
-import time
 
 def get_db():
-    for _ in range(3):
-        try:
-            return psycopg2.connect(DATABASE_URL, connect_timeout=30)
-        except Exception:
-            time.sleep(3)
-    raise Exception("Database connection failed after retries")
+    return psycopg2.connect(os.environ["DATABASE_URL"])
 
-def resolve_creator(firebase_uid, creator_id=None):
-    raw = creator_id or firebase_uid
+
+def normalize_youtube_url(url):
+    if not url:
+        return url
+    m = re.match(r'https?://youtu\.be/([a-zA-Z0-9_-]{11})', url)
+    if m:
+        return f'https://www.youtube.com/watch?v={m.group(1)}'
+    m = re.match(r'https?://(?:www\.)?youtube\.com/shorts/([a-zA-Z0-9_-]{11})', url)
+    if m:
+        return f'https://www.youtube.com/watch?v={m.group(1)}'
+    return url
+
+
+def extract_youtube_metadata(url):
+    url = normalize_youtube_url(url)
+    if not url or 'youtube' not in url:
+        return {}
     try:
-        return str(uuid.UUID(raw))
-    except ValueError:
-        return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))
-
-def ensure_creator(cur, creator_uuid, firebase_uid, email=None):
-    cur.execute(
-        "INSERT INTO creators (id, firebase_uid, email, created_at) "
-        "VALUES (%s, %s, %s, NOW()) ON CONFLICT DO NOTHING",
-        (creator_uuid, firebase_uid, email or f"{creator_uuid}@auto.seekreap.local")
-    )
-
-def upsert_submission(cur, submission_id, creator_uuid, content_hash, extra_cols):
-    col_names = ["id", "creator_id", "content_hash", "status", "submitted_at"] + list(extra_cols.keys())
-    placeholders = ["%s", "%s", "%s", "%s", "NOW()"] + ["%s"] * len(extra_cols)
-    params = [submission_id, creator_uuid, content_hash, "pending"] + list(extra_cols.values())
-    sql = (
-        "INSERT INTO submissions (" + ", ".join(col_names) + ") "
-        "VALUES (" + ", ".join(placeholders) + ") "
-        "ON CONFLICT (creator_id, content_hash) DO NOTHING RETURNING id"
-    )
-    cur.execute(sql, params)
-    row = cur.fetchone()
-    if row:
-        return str(row["id"]), True
-    cur.execute(
-        "SELECT id FROM submissions WHERE creator_id = %s AND content_hash = %s",
-        (creator_uuid, content_hash)
-    )
-    existing = cur.fetchone()
-    if not existing:
-        raise Exception(f"Upsert conflict but no existing row (creator={creator_uuid}, hash={content_hash[:16]}...)")
-    return str(existing["id"]), False
-
-def enqueue_job(cur, submission_id, creator_uuid, content_id, job_type, params_dict):
-    cur.execute(
-        "INSERT INTO job_queue (submission_id, creator_id, content_id, job_type, params, status, attempts, created_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, NOW()) "
-        "ON CONFLICT (submission_id, job_type) WHERE status NOT IN ('completed', 'failed') DO NOTHING",
-        (submission_id, creator_uuid, content_id, job_type, json.dumps(params_dict), "pending", 0)
-    )
-
-def err(msg, code=500):
-    print(f"[ERROR {code}] {msg}", flush=True)
-    return jsonify({"error": str(msg)}), code
-
-
-def get_submission(cur, submission_id):
-    """Helper to fetch submission data"""
-    cur.execute("""
-        SELECT id, creator_id, content_url, content_hash, submitted_at, status
-        FROM submissions
-        WHERE id = %s
-    """, (submission_id,))
-    row = cur.fetchone()
-    if row:
-        return dict(row)
-    return None
-
-
-@app.get("/health")
-def health():
-    return jsonify({"status": "ok"})
-
-@app.post("/api/submit")
-def submit_content():
-    try:
-        data = request.get_json(force=True, silent=True) or {}
-        firebase_uid = data.get("firebase_uid")
-        content_url = data.get("content_url")
-        content_type = data.get("content_type", "youtube_video")
-        creator_id = data.get("creator_id", firebase_uid)
-        email = data.get("email")
-        if not firebase_uid or not content_url:
-            return err("firebase_uid and content_url required", 400)
-        creator_uuid = resolve_creator(firebase_uid, creator_id)
-        content_hash = hashlib.sha256(content_url.encode()).hexdigest()
-        channel_id = str(uuid.uuid5(uuid.NAMESPACE_URL, creator_uuid + "-channel"))
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        try:
-            ensure_creator(cur, creator_uuid, firebase_uid, email)
-            submission_id, is_new = upsert_submission(
-                cur, str(uuid.uuid4()), creator_uuid, content_hash,
-                {"content_url": content_url, "content_type": content_type}
-            )
-            if not is_new:
-                conn.commit()
-                return jsonify({"submission_id": submission_id, "status": "already_registered"})
-            cur.execute(
-                "INSERT INTO content_submissions (submission_id, creator_id, channel_id, status, content_hash, submitted_at) "
-                "VALUES (%s, %s, %s, %s, %s, NOW()) ON CONFLICT (submission_id) DO NOTHING",
-                (submission_id, creator_uuid, channel_id, "pending", content_hash)
-            )
-            enqueue_job(cur, submission_id, creator_uuid, content_hash, "file_processing",
-                        {"content_url": content_url, "content_hash": content_hash, "content_type": content_type})
-            conn.commit()
-            return jsonify({"submission_id": submission_id, "status": "pending"})
-        except Exception as e:
-            conn.rollback()
-            print(traceback.format_exc(), flush=True)
-            return err(str(e))
-        finally:
-            cur.close()
-            conn.close()
+        m = re.search(r'[?&]v=([a-zA-Z0-9_-]{11})', url)
+        if not m:
+            return {}
+        video_id = m.group(1)
+        oembed = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        resp = requests.get(oembed, timeout=10)
+        if resp.status_code != 200:
+            return {}
+        data = resp.json()
+        return {
+            'title':         data.get('title', ''),
+            'channel':       data.get('author_name', ''),
+            'duration':      None,
+            'upload_date':   '',
+            'thumbnail_url': f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
+            'youtube_id':    video_id,
+            'description':   '',
+        }
     except Exception as e:
-        print(traceback.format_exc(), flush=True)
-        return err(str(e))
+        print(f'YouTube oEmbed error: {e}')
+    return {}
 
-@app.post("/api/upload")
-def upload_content():
+
+def get_or_create_creator(conn, firebase_uid, email=None, name=None):
+    cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        file = request.files.get("file")
-        firebase_uid = request.form.get("firebase_uid")
-        content_type = request.form.get("content_type", "file")
-        email = request.form.get("email")
-        if not file or not firebase_uid:
-            return err("file and firebase_uid required", 400)
-        creator_uuid = resolve_creator(firebase_uid)
-        content = file.read()
-        file_hash = hashlib.sha256(content).hexdigest()
-        filename = file.filename
-        channel_id = str(uuid.uuid5(uuid.NAMESPACE_URL, creator_uuid + "-channel"))
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         try:
-            ensure_creator(cur, creator_uuid, firebase_uid, email)
-            submission_id, is_new = upsert_submission(
-                cur, str(uuid.uuid4()), creator_uuid, file_hash,
-                {"content_type": content_type}
-            )
-            if not is_new:
-                conn.commit()
-                return jsonify({"submission_id": submission_id, "status": "already_registered"})
-            cur.execute(
-                "INSERT INTO content_submissions (submission_id, creator_id, channel_id, status, content_hash, submitted_at) "
-                "VALUES (%s, %s, %s, %s, %s, NOW()) ON CONFLICT (submission_id) DO NOTHING",
-                (submission_id, creator_uuid, channel_id, "pending", file_hash)
-            )
-            enqueue_job(cur, submission_id, creator_uuid, file_hash, "file_processing",
-                        {"filename": filename, "content_hash": file_hash, "content_type": content_type})
-            conn.commit()
-            return jsonify({"submission_id": submission_id, "status": "pending",
-                            "message": "Content registered and queued for processing"})
-        except Exception as e:
-            conn.rollback()
-            print(traceback.format_exc(), flush=True)
-            return err(str(e))
-        finally:
-            cur.close()
-            conn.close()
-    except Exception as e:
-        print(traceback.format_exc(), flush=True)
-        return err(str(e))
+            uuid.UUID(firebase_uid)
+            cur.execute("SELECT id FROM creators WHERE id = %s", (firebase_uid,))
+            row = cur.fetchone()
+            if row:
+                return firebase_uid
+        except (ValueError, AttributeError):
+            pass
 
-@app.get("/api/status/<submission_id>")
-def get_status(submission_id):
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    try:
-        cur.execute(
-            "SELECT id, status, overall_risk_score, risk_level, content_url, submitted_at, completed_at "
-            "FROM submissions WHERE id = %s", (submission_id,)
-        )
+        cur.execute("ALTER TABLE creators ADD COLUMN IF NOT EXISTS firebase_uid varchar(128) UNIQUE")
+        conn.commit()
+
+        cur.execute("SELECT id FROM creators WHERE firebase_uid = %s", (firebase_uid,))
         row = cur.fetchone()
-        if not row:
-            return err("not found", 404)
-        cur.execute(
-            "SELECT job_id, job_type, status, attempts, created_at, completed_at "
-            "FROM job_queue WHERE submission_id = %s ORDER BY created_at DESC", (submission_id,)
-        )
-        jobs = cur.fetchall()
-        cur.execute(
-            "SELECT cm.matched_submission_id, cm.similarity_score, cm.match_type, "
-            "cm.fingerprint_version, cm.detected_at, ms.title as matched_title, "
-            "ms.content_url as matched_url, cm.severity "
-            "FROM content_matches cm JOIN submissions ms ON ms.id = cm.matched_submission_id "
-            "WHERE cm.submission_id = %s ORDER BY cm.similarity_score DESC LIMIT 10",
-            (submission_id,)
-        )
-        matches = cur.fetchall()
-        result = dict(row)
-        result["jobs"] = [dict(j) for j in jobs]
-        result["latest_job"] = dict(jobs[0]) if jobs else None
-        result["matches"] = [{
-            "matched_submission_id": str(m["matched_submission_id"]),
-            "similarity_score": float(m["similarity_score"]),
-            "match_type": m["match_type"],
-            "fingerprint_version": m["fingerprint_version"],
-            "detected_at": m["detected_at"].isoformat() if m["detected_at"] else None,
-            "matched_title": m["matched_title"] or "",
-            "matched_url": m["matched_url"] or "",
-            "severity": m["severity"] or "medium",
-        } for m in matches]
-        result["has_match"] = len(result["matches"]) > 0
-        return jsonify(result)
+        if row:
+            return str(row["id"])
+
+        new_id = str(uuid.uuid4())
+        cur.execute("""
+            INSERT INTO creators (id, email, name, firebase_uid)
+            VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING RETURNING id
+        """, (new_id, email or f"{firebase_uid}@firebase.user", name or "Creator", firebase_uid))
+        row = cur.fetchone()
+        conn.commit()
+        if row:
+            return str(row["id"])
+        cur.execute("SELECT id FROM creators WHERE firebase_uid = %s", (firebase_uid,))
+        row = cur.fetchone()
+        return str(row["id"]) if row else new_id
+    finally:
+        cur.close()
+
+
+def insert_submission(data, creator_uuid):
+    content_url  = data.get("content_url")
+    content_hash = data.get("content_hash", "unknown")
+    content_type = data.get("content_type", "video")
+
+    conn = get_db()
+    cur  = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT id, title, content_preview_url
+            FROM submissions
+            WHERE creator_id = %s AND content_hash = %s
+            ORDER BY submitted_at DESC LIMIT 1
+        """, (creator_uuid, content_hash))
+        existing = cur.fetchone()
+        if existing:
+            print(f"Dedup: returning {existing['id']} for hash {content_hash}")
+            return str(existing["id"]), existing["title"] or content_hash, "", existing["content_preview_url"] or ""
+
+        submission_id = str(uuid.uuid4())
+        yt_meta       = extract_youtube_metadata(content_url)
+        title         = yt_meta.get("title") or data.get("title") or content_hash
+        channel       = yt_meta.get("channel", "")
+        thumbnail_url = yt_meta.get("thumbnail_url", "")
+        metadata      = {**yt_meta, **(data.get("metadata") or {})}
+
+        cur.execute("""
+            INSERT INTO submissions
+                (id, creator_id, title, description, content_hash, content_type,
+                 content_url, content_preview_url, status, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s)
+        """, (submission_id, creator_uuid, title,
+              data.get("description") or yt_meta.get("description", ""),
+              content_hash, content_type, content_url, thumbnail_url,
+              json.dumps(metadata)))
+        conn.commit()
+        print(f"Created submission {submission_id} title={title!r}")
+
+        cur.execute("""
+            INSERT INTO job_queue
+                (submission_id, creator_id, content_id, job_type, status, attempts)
+            VALUES (%s, %s, %s, %s, %s, 0)
+            ON CONFLICT DO NOTHING
+        """, (submission_id, creator_uuid, content_url, "fingerprint", "pending"))
+        conn.commit()
     except Exception as e:
-        return err(str(e))
+        conn.rollback()
+        print(f"DB insert error: {e}")
+        raise
+    finally:
+        cur.close()
+        conn.close()
+    return submission_id, title, channel, thumbnail_url
+
+
+def check_rate_limit(creator_uuid: str) -> tuple:
+    conn = get_db()
+    cur  = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM job_queue WHERE status IN ('pending', 'processing')")
+        if cur.fetchone()[0] >= QUEUE_CAP:
+            return False, f"System queue full. Try again later."
+
+        cur.execute("""
+            SELECT COUNT(*) FROM submissions
+            WHERE creator_id = %s AND submitted_at >= NOW() - INTERVAL '24 hours'
+        """, (creator_uuid,))
+        daily = cur.fetchone()[0]
+        if daily >= DAILY_QUOTA:
+            return False, f"Daily quota reached ({daily}/{DAILY_QUOTA}). Resets in 24h."
+
+        return True, ""
     finally:
         cur.close()
         conn.close()
 
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+def health():
+    try:
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.close()
+        conn.close()
+        return jsonify({"status": "ok", "tier": 4})
+    except Exception as e:
+        return jsonify({"status": "error", "db": str(e)}), 500
+
+
+@app.post("/api/submit")
+def submit():
+    try:
+        data         = request.get_json()
+        firebase_uid = data.get("creator_id", "")
+        conn         = get_db()
+        try:
+            creator_uuid = get_or_create_creator(conn, firebase_uid,
+                                                  data.get("email"), data.get("name"))
+        finally:
+            conn.close()
+
+        allowed, reason = check_rate_limit(creator_uuid)
+        if not allowed:
+            return jsonify({"error": reason, "code": "RATE_LIMITED"}), 429
+
+        submission_id, title, channel, thumbnail_url = insert_submission(data, creator_uuid)
+        return jsonify({
+            "submission_id": submission_id,
+            "status":        "pending",
+            "creator_uuid":  creator_uuid,
+            "title":         title,
+            "channel":       channel,
+            "thumbnail_url": thumbnail_url,
+        })
+    except Exception as e:
+        print(f"Submit error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/certify")
+def certify_work():
+    body = request.get_json(force=True) or {}
+
+    creator_id_raw  = (body.get("creator_id") or body.get("supabase_uid") or "").strip()
+    title           = (body.get("title") or "Untitled Work").strip()
+    plan            = body.get("plan", "free").lower().strip()
+    work_type       = (body.get("work_type") or "other").strip()
+    artistic_name   = (body.get("artistic_name") or "").strip()
+    content_hash    = (body.get("content_hash") or "").strip()
+    collaborators   = body.get("collaborators") or []
+    ownership_split = body.get("ownership_split") or {}
+    email           = (body.get("email") or "").strip()
+
+    if not creator_id_raw:
+        return jsonify({"error": "creator_id required"}), 400
+    if plan not in VALID_PLANS:
+        return jsonify({"error": f"invalid plan '{plan}'"}), 400
+
+    try:
+        creator_uuid = str(uuid.UUID(creator_id_raw))
+    except (ValueError, AttributeError):
+        creator_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, creator_id_raw))
+
+    if not content_hash:
+        content_hash = hashlib.sha256(
+            f"{creator_uuid}:{title}:{datetime.utcnow().isoformat()}".encode()
+        ).hexdigest()
+
+    suffix      = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    cert_id     = f"SR-{datetime.utcnow().strftime('%Y%m%d')}-{suffix}"
+    content_url = body.get("content_url") or f"seekreap://local/{content_hash}"
+
+    conn = get_db()
+    cur  = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        creator_email = email or f"{creator_uuid[:8]}@seekreap.local"
+        # Upsert by id; if email conflicts with another row, fall back to placeholder
+        try:
+            cur.execute("""
+                INSERT INTO creators (id, email, name)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+            """, (creator_uuid, creator_email, artistic_name or title))
+        except Exception:
+            conn.rollback()
+            cur.execute("""
+                INSERT INTO creators (id, email, name)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+            """, (creator_uuid, f"{creator_uuid[:8]}@seekreap.local", artistic_name or title))
+
+        cur.execute("""
+            INSERT INTO submissions
+               (id, creator_id, content_url, content_hash, title,
+                plan, artistic_name, work_type, cert_id,
+                collaborators, ownership_split, status, content_type)
+            VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s)
+            RETURNING id
+        """, (creator_uuid, content_url, content_hash, title,
+              plan, artistic_name, work_type, cert_id,
+              Json(collaborators) if collaborators else None,
+              Json(ownership_split) if ownership_split else None,
+              work_type))
+
+        row           = cur.fetchone()
+        submission_id = str(row["id"])
+
+        # Insert into content_submissions BEFORE job_queue (FK requirement)
+        cur.execute("""
+            INSERT INTO content_submissions
+                (submission_id, creator_id, title, content_hash, status)
+            VALUES (%s, %s, %s, %s, 'pending')
+            ON CONFLICT (submission_id) DO NOTHING
+        """, (submission_id, creator_uuid, title, content_hash))
+
+        cur.execute("""
+            INSERT INTO job_queue
+               (submission_id, creator_id, content_id, job_type, status, attempts)
+            VALUES (%s, %s, %s, 'certification', 'pending', 0)
+            ON CONFLICT DO NOTHING
+        """, (submission_id, creator_uuid, content_url))
+
+        conn.commit()
+        print(f"[CERTIFY] submission={submission_id} cert={cert_id} plan={plan}")
+
+        # Generate QR code URL
+        qr_url = f"/api/qrcode/{cert_id}"
+        
+        return jsonify({
+            "submission_id": submission_id,
+            "cert_id":       cert_id,
+            "plan":          plan,
+            "status":        "queued",
+            "qr_url":        qr_url,
+            "message":       "Certification queued successfully",
+        }), 202
+
+    except Exception as e:
+        conn.rollback()
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/certify/<submission_id>")
+def certify_status(submission_id):
+    conn = get_db()
+    cur  = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT id, status, cert_id, title, work_type, plan,
+                   artistic_name, overall_risk_score, risk_level,
+                   submitted_at, completed_at, failure_reason
+            FROM submissions WHERE id = %s
+        """, (submission_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "not found"}), 404
+        data = dict(row)
+        data["id"] = str(data["id"])
+        for k in ("submitted_at", "completed_at"):
+            if data[k]:
+                data[k] = data[k].isoformat()
+        return jsonify(data), 200
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/status/<submission_id>")
+def status(submission_id):
+    conn = get_db()
+    cur  = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT s.id, s.status, s.overall_risk_score, s.risk_level,
+                   s.title, s.content_url, s.content_preview_url,
+                   s.metadata, s.completed_at,
+                   j.status as queue_status, j.attempts
+            FROM submissions s
+            LEFT JOIN job_queue j ON s.id = j.submission_id
+            WHERE s.id = %s
+        """, (submission_id,))
+        row = cur.fetchone()
+
+        cur.execute("""
+            SELECT cm.matched_submission_id, cm.similarity_score,
+                   cm.match_type, cm.fingerprint_version, cm.detected_at,
+                   ms.title as matched_title, ms.content_url as matched_url,
+                   cm.severity
+            FROM content_matches cm
+            JOIN submissions ms ON ms.id = cm.matched_submission_id
+            WHERE cm.submission_id = %s
+            ORDER BY cm.similarity_score DESC LIMIT 10
+        """, (submission_id,))
+        matches = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        return jsonify({"error": "not found"}), 404
+
+    result = dict(row)
+    meta = result.get("metadata") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = {}
+    result["yt_title"]       = meta.get("title", "") or result.get("title", "")
+    result["yt_channel"]     = meta.get("channel", "")
+    result["yt_duration"]    = meta.get("duration")
+    result["yt_upload_date"] = meta.get("upload_date", "")
+    result["yt_thumbnail"]   = meta.get("thumbnail_url", "") or result.get("content_preview_url", "")
+    result["yt_id"]          = meta.get("youtube_id", "")
+    result["matches"] = [
+        {
+            "matched_submission_id": str(m["matched_submission_id"]),
+            "similarity_score":      float(m["similarity_score"]),
+            "match_type":            m["match_type"],
+            "fingerprint_version":   m["fingerprint_version"],
+            "detected_at":           m["detected_at"].isoformat() if m["detected_at"] else None,
+            "matched_title":         m["matched_title"] or "",
+            "matched_url":           m["matched_url"] or "",
+            "severity":              m["severity"] or "medium",
+        }
+        for m in matches
+    ]
+    result["has_match"] = len(result["matches"]) > 0
+    return jsonify(result)
+
+
+@app.get("/api/submissions")
+def list_submissions():
+    creator_id = request.headers.get('X-Creator-ID') or request.args.get('creator_id')
+    if not creator_id:
+        return jsonify({"error": "X-Creator-ID header required"}), 400
+
+    try:
+        creator_uuid = str(uuid.UUID(creator_id))
+    except ValueError:
+        creator_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, creator_id))
+
+    conn = get_db()
+    cur  = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT s.id, s.content_url, s.content_type, s.status,
+                   s.overall_risk_score, s.risk_level,
+                   s.submitted_at, s.completed_at, s.title,
+                   s.content_preview_url AS thumbnail,
+                   NULL::text            AS channel,
+                   COUNT(cm.id)          AS match_count,
+                   MAX(cm.severity)      AS max_severity
+            FROM submissions s
+            LEFT JOIN content_matches cm ON cm.submission_id = s.id
+            WHERE s.creator_id = %s
+            GROUP BY s.id
+            ORDER BY s.submitted_at DESC
+            LIMIT 50
+        """, (creator_uuid,))
+        rows = cur.fetchall()
+        return jsonify({
+            "submissions": [
+                {
+                    "id":                str(r["id"]),
+                    "content_url":       r["content_url"],
+                    "content_type":      r["content_type"],
+                    "status":            (r["status"] or "").upper(),
+                    "overall_risk_score": r["overall_risk_score"],
+                    "risk_level":        r["risk_level"],
+                    "submitted_at":      r["submitted_at"].isoformat() if r["submitted_at"] else None,
+                    "completed_at":      r["completed_at"].isoformat() if r["completed_at"] else None,
+                    "title":             r["title"],
+                    "channel":           r["channel"],
+                    "thumbnail":         r["thumbnail"],
+                    "match_count":       int(r["match_count"] or 0),
+                    "max_severity":      r["max_severity"],
+                }
+                for r in rows
+            ],
+            "total": len(rows),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/metrics/latency")
+def latency_metrics():
+    conn = get_db()
+    cur  = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT
+                COUNT(*)::int AS total_completed,
+                ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - submitted_at))))::float AS avg_seconds,
+                ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (
+                    ORDER BY EXTRACT(EPOCH FROM (completed_at - submitted_at))
+                ))::float AS p95_seconds,
+                ROUND(MIN(EXTRACT(EPOCH FROM (completed_at - submitted_at))))::float AS min_seconds,
+                ROUND(MAX(EXTRACT(EPOCH FROM (completed_at - submitted_at))))::float AS max_seconds
+            FROM submissions
+            WHERE status = 'completed'
+              AND completed_at IS NOT NULL AND submitted_at IS NOT NULL
+              AND completed_at > submitted_at
+              AND submitted_at >= NOW() - INTERVAL '7 days'
+        """)
+        row = cur.fetchone()
+        cur.execute("SELECT COUNT(*) AS cnt FROM job_queue WHERE status IN ('pending','processing')")
+        queue_depth = cur.fetchone()["cnt"]
+        cur.execute("SELECT COUNT(*) AS cnt FROM job_queue WHERE status='failed' AND created_at >= NOW() - INTERVAL '24 hours'")
+        failed_24h = cur.fetchone()["cnt"]
+        return jsonify({
+            "latency_7d": {
+                "total_completed": int(row["total_completed"] or 0),
+                "avg_seconds":     float(row["avg_seconds"]) if row["avg_seconds"] is not None else None,
+                "p95_seconds":     float(row["p95_seconds"]) if row["p95_seconds"] is not None else None,
+                "min_seconds":     float(row["min_seconds"]) if row["min_seconds"] is not None else None,
+                "max_seconds":     float(row["max_seconds"]) if row["max_seconds"] is not None else None,
+            },
+            "queue_depth": queue_depth,
+            "failed_24h":  failed_24h,
+            "quota":       {"daily_limit": DAILY_QUOTA, "queue_cap": QUEUE_CAP},
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.post("/api/finalize")
 def finalize():
+    data          = request.get_json()
+    submission_id = data["submission_id"]
+    analysis      = data["analysis"]
+    conn = get_db()
+    cur  = conn.cursor()
     try:
-        data = request.get_json(force=True, silent=True) or {}
-        submission_id = data.get("submission_id")
-        analysis = data.get("analysis", {})
-        if not submission_id:
-            return err("submission_id required", 400)
-        conn = get_db()
-        cur = conn.cursor()
-        try:
-            cur.execute(
-                "UPDATE submissions SET status=%s, overall_risk_score=%s, risk_level=%s, completed_at=NOW() "
-                "WHERE id=%s RETURNING id",
-                ("completed", analysis.get("risk_score"), analysis.get("risk_level"), submission_id)
-            )
-            updated = cur.fetchone()
-            cur.execute(
-                "UPDATE job_queue SET status=%s, completed_at=NOW() "
-                "WHERE submission_id=%s AND status NOT IN (%s, %s)",
-                ("completed", submission_id, "completed", "failed")
-            )
-            conn.commit()
-            return jsonify({"status": "updated"}) if updated else err("not found", 404)
-        except Exception as e:
-            conn.rollback()
-            print(traceback.format_exc(), flush=True)
-            return err(str(e))
-        finally:
-            cur.close()
-            conn.close()
+        cur.execute("""
+            UPDATE submissions SET status='completed',
+               overall_risk_score=%s, risk_level=%s, completed_at=NOW()
+            WHERE id=%s RETURNING id
+        """, (analysis.get("risk_score"), analysis.get("risk_level"), submission_id))
+        updated = cur.fetchone()
+        cur.execute("UPDATE job_queue SET status='completed', completed_at=NOW() WHERE submission_id=%s",
+                    (submission_id,))
+        conn.commit()
     except Exception as e:
-        return err(str(e))
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+    return jsonify({"status": "updated"}) if updated else (jsonify({"error": "not found"}), 404)
+
+
+@app.post("/api/admin/recover-stuck-jobs")
+def recover_stuck_jobs():
+    conn = get_db()
+    cur  = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE job_queue
+            SET status = 'pending', attempts = attempts + 1,
+                failure_reason = 'recovered: stuck in processing'
+            WHERE status = 'processing'
+              AND processing_started_at < NOW() - INTERVAL '10 minutes'
+            RETURNING job_id
+        """)
+        recovered = cur.fetchall()
+        conn.commit()
+        return jsonify({"recovered": len(recovered), "job_ids": [r[0] for r in recovered]})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
 
 @app.get("/api/verify-proof/<submission_id>")
 def verify_blockchain_proof(submission_id):
     conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur  = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        cur.execute("SELECT blockchain_proof, blockchain_timestamp FROM submissions WHERE id = %s", (submission_id,))
-        row = cur.fetchone()
-        if row and row.get("blockchain_proof"):
-            return jsonify({
-                "verified": True, "proof": row["blockchain_proof"],
-                "timestamp": row["blockchain_timestamp"].isoformat() if row["blockchain_timestamp"] else None
-            })
-        return jsonify({"error": "No blockchain proof found", "verified": False})
-    except Exception as e:
-        return err(str(e))
-    finally:
-        cur.close()
-        conn.close()
-
-@app.post("/test/insert-job")
-def insert_test_job():
-    try:
-        firebase_uid = "test-firebase-user-001"
-        creator_id = str(uuid.uuid5(uuid.NAMESPACE_URL, firebase_uid))
-        channel_id = str(uuid.uuid5(uuid.NAMESPACE_URL, creator_id + "-channel"))
-        submission_id = str(uuid.uuid4())
-        content_hash = hashlib.sha256(f"test_{uuid.uuid4()}".encode()).hexdigest()
-        filename = f"test_audio_{int(datetime.now().timestamp())}.wav"
-        conn = get_db()
-        cur = conn.cursor()
-        try:
-            ensure_creator(cur, creator_id, firebase_uid)
-            cur.execute(
-                "INSERT INTO submissions (id, creator_id, content_type, content_hash, status, submitted_at) "
-                "VALUES (%s, %s, %s, %s, %s, NOW()) ON CONFLICT (id) DO NOTHING",
-                (submission_id, creator_id, "audio", content_hash, "pending")
-            )
-            cur.execute(
-                "INSERT INTO content_submissions (submission_id, creator_id, channel_id, status, content_hash, submitted_at) "
-                "VALUES (%s, %s, %s, %s, %s, NOW()) ON CONFLICT (submission_id) DO NOTHING",
-                (submission_id, creator_id, channel_id, "pending", content_hash)
-            )
-            enqueue_job(cur, submission_id, creator_id, content_hash, "file_processing",
-                        {"filename": filename, "content_hash": content_hash, "content_type": "audio"})
-            conn.commit()
-            return jsonify({"status": "ok", "submission_id": submission_id, "content": filename})
-        except Exception as e:
-            conn.rollback()
-            print(traceback.format_exc(), flush=True)
-            return err(str(e))
-        finally:
-            cur.close()
-            conn.close()
-    except Exception as e:
-        return err(str(e))
-
-
-
-@app.get("/verify/<submission_id>")
-def verify(submission_id):
-    """Verify a submission by ID"""
-    # Validate UUID format first
-    try:
-        uuid.UUID(submission_id)
-    except ValueError:
-        return jsonify({"verified": False, "error": "Invalid submission ID format"}), 400
-    
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    try:
-        row = get_submission(cur, submission_id)
-        
-        if not row:
-            return jsonify({"verified": False, "error": "Submission not found"}), 404
-        
-        return jsonify({
-            "verified": True,
-            "submission_id": submission_id,
-            "creator_id": row["creator_id"],
-            "content_url": row["content_url"],
-            "content_hash": row["content_hash"],
-            "submitted_at": row["submitted_at"].isoformat() if row["submitted_at"] else None,
-            "status": row.get("status", "unknown")
-        })
-    finally:
-        cur.close()
-        conn.close()
-@app.get("/api/qrcode/<submission_id>")
-def generate_qr_code(submission_id):
-    """Generate QR code for submission verification"""
-    try:
-        uuid.UUID(submission_id)
-    except ValueError:
-        return jsonify({"error": "Invalid submission ID format"}), 400
-    try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute(
-            "SELECT id, creator_id, content_hash, submitted_at, status FROM submissions WHERE id = %s",
-            (submission_id,)
-        )
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        if not row:
-            return jsonify({"error": "Submission not found"}), 404
-        verify_url = f"https://seekreap-tier-4-dev.fly.dev/verify/{submission_id}"
-        qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=10, border=4)
-        qr.add_data(verify_url)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        img_buffer = io.BytesIO()
-        img.save(img_buffer, format="PNG")
-        img_buffer.seek(0)
-        return send_file(img_buffer, mimetype="image/png", as_attachment=False,
-                         download_name=f"qrcode_{submission_id}.png")
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.get("/api/qrcode-rich/<submission_id>")
-def generate_rich_qr_code(submission_id):
-    """Generate QR code with embedded submission metadata"""
-    try:
-        uuid.UUID(submission_id)
-    except ValueError:
-        return jsonify({"error": "Invalid submission ID format"}), 400
-    try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
-            SELECT s.id, s.creator_id, s.content_hash, s.submitted_at, s.status,
-                   s.overall_risk_score, s.risk_level, c.email as creator_email
-            FROM submissions s
-            LEFT JOIN creators c ON c.id = s.creator_id
-            WHERE s.id = %s
+            SELECT id, blockchain_proof, blockchain_timestamp, blockchain_verified
+            FROM submissions WHERE id = %s
         """, (submission_id,))
-        submission = cur.fetchone()
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"verified": False, "error": "not found"}), 404
+        if not row.get("blockchain_proof"):
+            return jsonify({"verified": False, "error": "No blockchain proof found"})
+        return jsonify({
+            "verified":  row["blockchain_verified"],
+            "timestamp": row["blockchain_timestamp"],
+            "proof":     row["blockchain_proof"],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
         cur.close()
         conn.close()
-        if not submission:
-            return jsonify({"error": "Submission not found"}), 404
-        qr_data = {
-            "type": "seekreap_verification", "version": "1.0",
-            "submission_id": submission["id"],
-            "verification_url": f"https://seekreap-tier-4-dev.fly.dev/verify/{submission_id}",
-            "certificate_url": f"https://seekreap-tier-4-dev.fly.dev/certificate/{submission_id}",
-            "submitted_at": submission["submitted_at"].isoformat() if submission["submitted_at"] else None,
-            "risk_level": submission["risk_level"] or "pending",
-            "status": submission["status"],
-            "creator_id": str(submission["creator_id"])[:8] if submission["creator_id"] else "unknown"
-        }
-        if submission.get("overall_risk_score"):
-            qr_data["risk_score"] = float(submission["overall_risk_score"])
-        qr = qrcode.QRCode(version=2, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=8, border=4)
-        qr.add_data(json.dumps(qr_data))
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        img_buffer = io.BytesIO()
-        img.save(img_buffer, format="PNG")
-        img_buffer.seek(0)
-        return send_file(img_buffer, mimetype="image/png", as_attachment=False,
-                         download_name=f"rich_qrcode_{submission_id}.png")
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/debug/env")
+def debug_env():
+    return jsonify({
+        "has_youtube_key": bool(os.environ.get("YOUTUBE_API_KEY")),
+        "has_db":          bool(os.environ.get("DATABASE_URL")),
+        "key_prefix":      os.environ.get("YOUTUBE_API_KEY", "")[:8],
+    })
+
+
+
+@app.get("/api/qrcode/<string:cert_id>")
+def generate_qrcode(cert_id):
+    """Generate QR code for certificate verification"""
+    import qrcode
+    from io import BytesIO
+    from flask import send_file
+    
+    # Create verification URL
+    verify_url = f"https://seekreap-frontend.onrender.com/verification_portal.html?cert={cert_id}"
+    
+    # Generate QR code
+    qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(verify_url)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # Save to bytes
+    img_io = BytesIO()
+    img.save(img_io, 'PNG')
+    img_io.seek(0)
+    
+    return send_file(img_io, mimetype='image/png')
 
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-@app.get("/certificate/<submission_id>")
-def certificate(submission_id):
+# Add these endpoints to tier4_main.py
+
+import secrets
+from datetime import datetime
+
+def generate_invite_token():
+    """Generate secure 64-character token for collaborator invites"""
+    return secrets.token_urlsafe(32)  # 64 chars total
+
+# ──────────────────────────────────────────────────────────────
+# POST /api/certify/invites - Create invites for collaborators
+# ──────────────────────────────────────────────────────────────
+
+@app.post("/api/certify/invites")
+def create_collaborator_invites():
+    """Create invite records for all collaborators in a certification"""
+    body = request.get_json(force=True) or {}
+    
+    collaborators = body.get("collaborators", [])
+    certificate_id = body.get("certificate_id")
+    invited_by = body.get("creator_id")
+    work_title = body.get("work_title", "Untitled Work")
+    
+    if not collaborators:
+        return jsonify({"error": "No collaborators provided"}), 400
+    
+    if not certificate_id:
+        return jsonify({"error": "certificate_id required"}), 400
+    
+    if not invited_by:
+        return jsonify({"error": "creator_id required"}), 400
+    
     conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    invites_created = []
+    
     try:
-        row = get_submission(cur, submission_id)
-
-        if not row:
-            return "Not found", 404
-
-        short_hash = row["content_hash"][:12] + "..."
-        verify_url = f"https://seekreap-tier-4-dev.fly.dev/verify/{submission_id}"
-
-        html = f"""
-        <html>
-        <head>
-            <title>SeekReap Certificate</title>
-        </head>
-        <body style="font-family:sans-serif; text-align:center; padding:40px;">
-            <h1>Content Verification Certificate</h1>
-
-            <p><b>Creator:</b> {row["creator_id"]}</p>
-            <p><b>Content:</b> {row["content_url"]}</p>
-            <p><b>Hash:</b> {short_hash}</p>
-            <p><b>Submission ID:</b> {submission_id}</p>
-            <p><b>Timestamp:</b> {row["submitted_at"]}</p>
-
-            <hr>
-
-            <p>Verify this certificate:</p>
-            <a href="{verify_url}">{verify_url}</a>
-        </body>
-        </html>
-        """
-
-        return html
-
+        for collab in collaborators:
+            token = generate_invite_token()
+            
+            cur.execute("""
+                INSERT INTO collaboration_invites 
+                (email, full_name, artistic_name, title, gender, country,
+                 ownership_title, split, certificate_id, invited_by, token, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                RETURNING id, token
+            """, (
+                collab.get("email"),
+                collab.get("fullName"),
+                collab.get("artisticName"),
+                collab.get("title"),
+                collab.get("gender"),
+                collab.get("country"),
+                collab.get("ownershipTitle"),
+                collab.get("split"),
+                certificate_id,
+                invited_by,
+                token
+            ))
+            
+            result = cur.fetchone()
+            invites_created.append({
+                "id": result["id"],
+                "token": result["token"],
+                "email": collab.get("email"),
+                "artistic_name": collab.get("artisticName")
+            })
+            
+            # TODO: Send email here (will implement next)
+            print(f"📧 Would send invite to {collab.get('email')} with token {token[:16]}...")
+        
+        conn.commit()
+        
+        return jsonify({
+            "success": True,
+            "invites": invites_created,
+            "message": f"Created {len(invites_created)} collaborator invites"
+        }), 201
+        
+    except Exception as e:
+        conn.rollback()
+        print(f"Error creating invites: {e}")
+        return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
 
+# ──────────────────────────────────────────────────────────────
+# GET /api/invite?token=XXX - Fetch invite details
+# ──────────────────────────────────────────────────────────────
 
-
-
-@app.get("/certificate-pdf/<submission_id>")
-def certificate_pdf(submission_id):
+@app.get("/api/invite")
+def get_invite():
+    """Fetch invite details for pre-filling signup form"""
+    token = request.args.get('token')
+    
+    if not token:
+        return jsonify({"error": "token required"}), 400
+    
     conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
     try:
-        row = get_submission(cur, submission_id)
-        if not row:
-            return "Not found", 404
-
-        verify_url = f"https://seekreap-tier-4-dev.fly.dev/verify/{submission_id}"
-
-        # --- Generate QR ---
-        qr = qrcode.make(verify_url)
-        qr_buffer = io.BytesIO()
-        qr.save(qr_buffer, format="PNG")
-        qr_buffer.seek(0)
-
-        # --- Create PDF ---
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        styles = getSampleStyleSheet()
-
-        elements = []
-
-        elements.append(Paragraph("SeekReap Certificate", styles["Title"]))
-        elements.append(Spacer(1, 12))
-
-        elements.append(Paragraph(f"Creator: {row['creator_id']}", styles["Normal"]))
-        elements.append(Paragraph(f"Content: {row['content_url']}", styles["Normal"]))
-        elements.append(Paragraph(f"Submission ID: {submission_id}", styles["Normal"]))
-        elements.append(Paragraph(f"Timestamp: {row['submitted_at']}", styles["Normal"]))
-        elements.append(Spacer(1, 20))
-
-        elements.append(Paragraph("Scan QR to verify:", styles["Normal"]))
-        elements.append(Spacer(1, 10))
-
-        elements.append(Image(qr_buffer, width=150, height=150))
-
-        elements.append(Spacer(1, 20))
-        elements.append(Paragraph(verify_url, styles["Normal"]))
-
-        doc.build(elements)
-
-        buffer.seek(0)
-
-        return (
-            buffer.read(),
-            200,
-            {
-                "Content-Type": "application/pdf",
-                "Content-Disposition": f"attachment; filename=certificate_{submission_id}.pdf"
-            }
-        )
-
+        # Critical: Only return pending, non-expired invites
+        cur.execute("""
+            SELECT email, full_name, artistic_name, title, gender, country,
+                   ownership_title, split, certificate_id, invited_by, status
+            FROM collaboration_invites
+            WHERE token = %s 
+              AND status = 'pending' 
+              AND expires_at > NOW()
+        """, (token,))
+        
+        invite = cur.fetchone()
+        
+        if not invite:
+            return jsonify({
+                "valid": False,
+                "error": "Invite not found, expired, or already accepted"
+            }), 404
+        
+        return jsonify({
+            "valid": True,
+            "email": invite["email"],
+            "full_name": invite["full_name"],
+            "artistic_name": invite["artistic_name"],
+            "title": invite["title"],
+            "gender": invite["gender"],
+            "country": invite["country"],
+            "ownership_title": invite["ownership_title"],
+            "split": invite["split"],
+            "certificate_id": invite["certificate_id"]
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
 
+# ──────────────────────────────────────────────────────────────
+# POST /api/invite/accept - Accept an invite after signup
+# ──────────────────────────────────────────────────────────────
 
-
+@app.post("/api/invite/accept")
+def accept_invite():
+    """
+    Accept a collaborator invite after user signs up.
+    Token is the ONLY lookup key - email is NOT used for security.
+    """
+    body = request.get_json(force=True) or {}
+    
+    token = body.get("token")
+    user_id = body.get("user_id")
+    user_email = body.get("email")  # For verification only
+    
+    if not token or not user_id:
+        return jsonify({"error": "token and user_id required"}), 400
+    
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Token is the ONLY lookup key (not email)
+        cur.execute("""
+            SELECT * FROM collaboration_invites
+            WHERE token = %s AND status = 'pending' AND expires_at > NOW()
+        """, (token,))
+        
+        invite = cur.fetchone()
+        
+        if not invite:
+            return jsonify({"error": "Invalid or expired invite"}), 404
+        
+        # Verify email matches (security check)
+        if user_email and invite["email"].lower() != user_email.lower():
+            return jsonify({"error": "Email does not match invite"}), 403
+        
+        # Update invite status
+        cur.execute("""
+            UPDATE collaboration_invites
+            SET status = 'accepted', accepted_at = NOW()
+            WHERE token = %s
+            RETURNING certificate_id, invited_by, split, ownership_title
+        """, (token,))
+        
+        updated = cur.fetchone()
+        
+        # Create collaborator record
+        cur.execute("""
+            INSERT INTO collaborators (user_id, certificate_id, ownership_title, split, role)
+            VALUES (%s, %s, %s, %s, 'co-owner')
+            ON CONFLICT (user_id, certificate_id) DO NOTHING
+        """, (
+            user_id,
+            updated["certificate_id"],
+            updated["ownership_title"],
+            updated["split"]
+        ))
+        
+        # Update profile if we have data
+        if invite.get("full_name") or invite.get("artistic_name"):
+            cur.execute("""
+                INSERT INTO profiles (id, full_name, artistic_name, title, gender, country)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    full_name = EXCLUDED.full_name,
+                    artistic_name = EXCLUDED.artistic_name,
+                    title = EXCLUDED.title,
+                    gender = EXCLUDED.gender,
+                    country = EXCLUDED.country,
+                    updated_at = NOW()
+            """, (
+                user_id,
+                invite.get("full_name"),
+                invite.get("artistic_name"),
+                invite.get("title"),
+                invite.get("gender"),
+                invite.get("country")
+            ))
+        
+        conn.commit()
+        
+        return jsonify({
+            "success": True,
+            "message": "Invite accepted successfully",
+            "certificate_id": updated["certificate_id"]
+        }), 200
+        
+    except Exception as e:
+        conn.rollback()
+        print(f"Error accepting invite: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()

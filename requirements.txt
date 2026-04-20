@@ -1,23 +1,7 @@
-flask==2.3.3
-flask-cors==4.0.0
-psycopg2-binary==2.9.9
+flask
+flask-cors
+psycopg2-binary
+requests
+python-dotenv
 
-# Sat Mar 28 11:20:54 UTC 2026
-
-# Sat Mar 28 15:02:23 UTC 2026
-
-# bust-1774710655
-
-# cert-1774783516
-
-# verify-1774783891
-qrcode==7.4.2
-Pillow==10.3.0
-reportlab==4.0.9
-
-# pdf-1774784140
-
-# verify-fix-1774785011
-
-# fix-1774785629
-# force-rebuild-1774786136
+qrcode[pil]==7.4.2
