@@ -11,6 +11,7 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, origins=[
     "https://seekreap-backend-dev.fly.dev",
+    "https://seekreap-frontend.onrender.com",
     "http://localhost:3000",
     "http://localhost:8080",
 ])
