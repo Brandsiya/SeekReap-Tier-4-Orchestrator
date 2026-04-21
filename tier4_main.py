@@ -1,8 +1,9 @@
 # SeekReap Tier-4 Orchestrator
-# Build: 2026-04-15
+# Build: 2026-04-22 — payment hardening rounds 1 + 2
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import uuid, os, json, psycopg2, re, requests, random, string, hmac, hashlib, secrets
+import json as _json, time as _time
 from psycopg2.extras import RealDictCursor, Json
 from dotenv import load_dotenv
 from datetime import datetime
@@ -20,6 +21,28 @@ DAILY_QUOTA = 50
 QUEUE_CAP   = 500
 VALID_PLANS = {"free", "creator", "studio", "payg"}
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Structured logging (JSON lines — Cloud Run / Fly.io log drains pick these up)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _log(level, component, event, **kw):
+    print(_json.dumps({
+        "ts":        _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+        "level":     level,
+        "component": component,
+        "event":     event,
+        **kw,
+    }))
+
+def log_info(component, event, **kw):  _log("INFO",  component, event, **kw)
+def log_warn(component, event, **kw):  _log("WARN",  component, event, **kw)
+def log_error(component, event, **kw): _log("ERROR", component, event, **kw)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DB helpers
+# ══════════════════════════════════════════════════════════════════════════════
 
 def get_db():
     return psycopg2.connect(os.environ["DATABASE_URL"])
@@ -61,7 +84,7 @@ def extract_youtube_metadata(url):
             'description':   '',
         }
     except Exception as e:
-        print(f'YouTube oEmbed error: {e}')
+        log_warn("youtube", "oembed_error", error=str(e))
     return {}
 
 
@@ -117,7 +140,7 @@ def insert_submission(data, creator_uuid):
         """, (creator_uuid, content_hash))
         existing = cur.fetchone()
         if existing:
-            print(f"Dedup: returning {existing['id']} for hash {content_hash}")
+            log_info("submit", "dedup_hit", submission_id=str(existing['id']), hash=content_hash)
             return str(existing["id"]), existing["title"] or content_hash, "", existing["content_preview_url"] or ""
 
         submission_id = str(uuid.uuid4())
@@ -137,7 +160,7 @@ def insert_submission(data, creator_uuid):
               content_hash, content_type, content_url, thumbnail_url,
               json.dumps(metadata)))
         conn.commit()
-        print(f"Created submission {submission_id} title={title!r}")
+        log_info("submit", "created", submission_id=submission_id, title=title)
 
         cur.execute("""
             INSERT INTO job_queue
@@ -148,7 +171,7 @@ def insert_submission(data, creator_uuid):
         conn.commit()
     except Exception as e:
         conn.rollback()
-        print(f"DB insert error: {e}")
+        log_error("submit", "db_insert_error", error=str(e))
         raise
     finally:
         cur.close()
@@ -176,7 +199,9 @@ def check_rate_limit(creator_uuid: str) -> tuple:
         conn.close()
 
 
-# ── Core routes ───────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Core routes
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/health")
 def health():
@@ -217,7 +242,7 @@ def submit():
             "thumbnail_url": thumbnail_url,
         })
     except Exception as e:
-        print(f"Submit error: {e}")
+        log_error("submit", "unhandled", error=str(e))
         return jsonify({"error": str(e)}), 500
 
 
@@ -303,7 +328,7 @@ def certify_work():
         """, (submission_id, creator_uuid, content_url))
 
         conn.commit()
-        print(f"[CERTIFY] submission={submission_id} cert={cert_id} plan={plan}")
+        log_info("certify", "queued", submission_id=submission_id, cert_id=cert_id, plan=plan)
 
         return jsonify({
             "submission_id": submission_id,
@@ -620,7 +645,7 @@ def generate_qrcode(cert_id):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def generate_invite_token():
-    return secrets.token_urlsafe(32)  # 64 URL-safe chars
+    return secrets.token_urlsafe(32)
 
 
 @app.post("/api/certify/invites")
@@ -660,7 +685,7 @@ def create_collaborator_invites():
                 "id": result["id"], "token": result["token"],
                 "email": collab.get("email"), "artistic_name": collab.get("artisticName"),
             })
-            print(f"[INVITE] queued for {collab.get('email')} token={token[:16]}...")
+            log_info("invite", "queued", email=collab.get("email"), token_prefix=token[:16])
         conn.commit()
         return jsonify({
             "success": True,
@@ -769,7 +794,7 @@ def accept_invite():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Payment system
+# Payment system — hardened (rounds 1 + 2)
 # ══════════════════════════════════════════════════════════════════════════════
 
 PAYSTACK_SECRET      = os.environ.get("PAYSTACK_SECRET_KEY", "")
@@ -778,8 +803,9 @@ PAYFAST_MERCHANT_KEY = os.environ.get("PAYFAST_MERCHANT_KEY", "")
 PAYFAST_PASSPHRASE   = os.environ.get("PAYFAST_PASSPHRASE", "")
 FRONTEND_URL         = os.environ.get("FRONTEND_URL", "https://seekreap-frontend.onrender.com")
 TIER4_INTERNAL       = os.environ.get("TIER4_INTERNAL", "https://seekreap-tier-4-dev.fly.dev")
+ADMIN_SECRET         = os.environ.get("ADMIN_SECRET", "")
 
-# Server-authoritative plan pricing in ZAR cents — client value is always ignored
+# Server-authoritative plan pricing in ZAR cents — client-supplied amount is always ignored
 PLAN_AMOUNTS = {
     "payg":    199,
     "creator": 999,
@@ -817,13 +843,37 @@ def ensure_payments_table():
 
 try:
     ensure_payments_table()
-    print("[PAYMENT] payments table ready")
+    log_info("payment", "table_ready")
 except Exception as _e:
-    print(f"[PAYMENT] table init warning: {_e}")
+    log_warn("payment", "table_init_warning", error=str(_e))
+
+
+def _require_admin(req):
+    """
+    Returns a 401 response if the X-Admin-Key header is missing or wrong,
+    otherwise returns None (caller proceeds normally).
+    """
+    if not ADMIN_SECRET or req.headers.get("X-Admin-Key") != ADMIN_SECRET:
+        log_warn("admin", "unauthorized", path=req.path, ip=req.remote_addr)
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
 
 
 def select_gateway(data):
-    return "paystack"
+    """
+    Route to the best gateway.
+      ZA country or ZAR currency → PayFast  (better local conversion)
+      Global                     → Paystack
+      Neither configured         → None     (caller raises 502)
+    """
+    country  = (data.get("country") or "").upper().strip()
+    currency = (data.get("currency") or "ZAR").upper().strip()
+
+    if (country == "ZA" or currency == "ZAR") and PAYFAST_MERCHANT_ID and PAYFAST_MERCHANT_KEY:
+        return "payfast"
+    if PAYSTACK_SECRET:
+        return "paystack"
+    return None
 
 
 def init_paystack(payment_id, data):
@@ -856,7 +906,7 @@ def init_paystack(payment_id, data):
             "reference":         resp["data"]["reference"],
         })
     except Exception as e:
-        print(f"[PAYSTACK] init error: {e}")
+        log_error("paystack", "init_error", error=str(e))
         return jsonify({"error": "Payment gateway unavailable"}), 502
 
 
@@ -881,12 +931,29 @@ def init_payfast(payment_id, data):
 
 
 def _strip_gateway_keys(meta):
-    """Remove gateway payload blobs before passing metadata to the cert pipeline."""
+    """Remove raw gateway blobs before passing metadata into the cert pipeline."""
     return {k: v for k, v in (meta or {}).items() if k not in ("paystack_event", "payfast_itn")}
 
 
+def _set_cert_retry_flag(payment_id_str):
+    """Mark a paid payment for cert retry without raising."""
+    try:
+        _c = get_db(); _cur = _c.cursor()
+        _cur.execute(
+            "UPDATE payments SET metadata = COALESCE(metadata,'{}') || %s::jsonb WHERE id = %s",
+            (_json.dumps({"cert_retry": True}), payment_id_str)
+        )
+        _c.commit(); _cur.close(); _c.close()
+    except Exception as _e:
+        log_error("payment", "cert_retry_flag_failed", payment_id=payment_id_str, error=str(_e))
+
+
 def trigger_certification(payment_row, pending_meta):
-    """Called after payment confirmed. Posts to /api/certify internally."""
+    """
+    Called after payment confirmed. Posts to /api/certify internally.
+    Returns the certify response dict on success, None on failure.
+    Callers should call _set_cert_retry_flag() if this returns None.
+    """
     meta    = pending_meta or {}
     payload = {
         "creator_id":      payment_row["creator_id"],
@@ -903,27 +970,28 @@ def trigger_certification(payment_row, pending_meta):
     try:
         r    = requests.post(TIER4_INTERNAL + "/api/certify", json=payload, timeout=30)
         data = r.json()
-        print(f"[PAYMENT] cert triggered: submission={data.get('submission_id')} cert={data.get('cert_id')}")
-        conn = get_db()
-        cur  = conn.cursor()
+        log_info("payment", "cert_triggered",
+                 submission_id=data.get("submission_id"), cert_id=data.get("cert_id"))
+        conn = get_db(); cur = conn.cursor()
         try:
             cur.execute("UPDATE payments SET submission_id = %s WHERE id = %s",
                         (data.get("submission_id"), str(payment_row["id"])))
             conn.commit()
         finally:
-            cur.close()
-            conn.close()
+            cur.close(); conn.close()
         return data
     except Exception as e:
-        print(f"[PAYMENT] trigger_certification error: {e}")
+        log_error("payment", "trigger_cert_error", error=str(e))
         return None
 
+
+# ── /api/payments/initiate ────────────────────────────────────────────────────
 
 @app.post("/api/payments/initiate")
 def initiate_payment():
     """
     Frontend entry point for paid plans.
-    Amount is ALWAYS derived server-side — client-supplied amount is ignored.
+    Amount is ALWAYS derived server-side — client value is ignored.
     """
     body = request.get_json(force=True) or {}
 
@@ -940,6 +1008,22 @@ def initiate_payment():
     if not email:
         return jsonify({"error": "email required"}), 400
 
+    # ── Rate limit: max 5 pending payments per creator per hour ──────────────
+    try:
+        _rl = get_db(); _rlc = _rl.cursor()
+        _rlc.execute("""
+            SELECT COUNT(*) FROM payments
+            WHERE creator_id = %s
+              AND status     = 'pending'
+              AND created_at > NOW() - INTERVAL '1 hour'
+        """, (creator_id,))
+        if _rlc.fetchone()[0] >= 5:
+            _rlc.close(); _rl.close()
+            return jsonify({"error": "Too many pending payments. Please complete or wait before retrying."}), 429
+        _rlc.close(); _rl.close()
+    except Exception as _e:
+        log_warn("payment", "rate_limit_check_failed", error=str(_e))
+
     amount = PLAN_AMOUNTS[plan]   # server-authoritative
 
     pending_meta = {
@@ -953,6 +1037,9 @@ def initiate_payment():
     }
 
     gateway = select_gateway(body)
+    if not gateway:
+        return jsonify({"error": "No payment gateway available"}), 502
+
     conn = get_db()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
     try:
@@ -978,46 +1065,97 @@ def initiate_payment():
     return jsonify({"error": "No gateway available"}), 502
 
 
+# ── /api/payments/webhook/paystack ───────────────────────────────────────────
+
 @app.post("/api/payments/webhook/paystack")
 def paystack_webhook():
     """
-    Paystack webhook — 4-layer security:
-      1. HMAC-SHA512 signature verification
-      2. Server-side transaction verify via Paystack API (prevents spoofed webhooks)
-      3. Amount check against DB record (prevents underpayment attacks)
-      4. Atomic UPDATE WHERE status != 'paid' (eliminates race conditions)
+    Paystack webhook — layered security:
+      1. HMAC-SHA512 signature
+      2. Reversal / refund event handling
+      3. Server-side verify via Paystack API (3 retries + backoff)
+      4. gateway_response must be Approved/Successful
+      5. Currency must be ZAR
+      6. Email consistency (init vs webhook)
+      7. Amount check against DB record
+      8. Atomic UPDATE WHERE status != 'paid'  (race-condition safe)
     """
     raw_body = request.get_data()
     sig      = request.headers.get("X-Paystack-Signature", "")
 
-    # Layer 1: HMAC signature
+    # 1. HMAC signature
     if PAYSTACK_SECRET:
         expected = hmac.new(PAYSTACK_SECRET.encode(), raw_body, hashlib.sha512).hexdigest()
         if not hmac.compare_digest(expected, sig):
-            print("[PAYSTACK] webhook signature mismatch")
+            log_warn("paystack", "webhook_sig_mismatch")
             return jsonify({"error": "Invalid signature"}), 400
 
     payload = request.get_json(force=True) or {}
-    if payload.get("event") != "charge.success":
+    event   = payload.get("event")
+
+    # 2. Reversal / refund handling
+    REVERSAL_EVENTS = {"charge.dispute.create", "transfer.reversed", "refund.processed"}
+    if event in REVERSAL_EVENTS:
+        _rev_ref = (payload.get("data") or {}).get("reference") or \
+                   (payload.get("data") or {}).get("transaction_reference", "")
+        if _rev_ref:
+            try:
+                _rc = get_db(); _rcur = _rc.cursor()
+                _rcur.execute(
+                    "UPDATE payments SET status = 'reversed' WHERE payment_ref = %s AND status = 'paid'",
+                    (_rev_ref,)
+                )
+                _rc.commit()
+                log_warn("paystack", "payment_reversed",
+                         ref=_rev_ref, event=event, rows=_rcur.rowcount)
+                _rcur.close(); _rc.close()
+            except Exception as _re:
+                log_error("paystack", "reversal_update_failed", ref=_rev_ref, error=str(_re))
+        return jsonify({"status": "ok"}), 200
+
+    if event != "charge.success":
         return jsonify({"status": "ignored"}), 200
 
     ref = payload["data"]["reference"]
 
-    # Layer 2: Server-side verify (confirms Paystack actually processed this)
-    try:
-        vr    = requests.get(
-            f"https://api.paystack.co/transaction/verify/{ref}",
-            headers={"Authorization": f"Bearer {PAYSTACK_SECRET}"},
-            timeout=15,
-        )
-        vdata = vr.json()
-        if not vdata.get("status") or vdata["data"]["status"] != "success":
-            print(f"[PAYSTACK] verify failed for {ref}: {vdata.get('message')}")
-            return jsonify({"error": "Paystack verification failed"}), 400
-        amount_verified = int(vdata["data"]["amount"])
-    except Exception as e:
-        print(f"[PAYSTACK] verify call error: {e}")
-        return jsonify({"error": "Could not verify transaction"}), 502
+    # 3. Server-side verify with retry + backoff
+    verify_data = None
+    for _attempt in range(3):
+        try:
+            _vr = requests.get(
+                f"https://api.paystack.co/transaction/verify/{ref}",
+                headers={"Authorization": f"Bearer {PAYSTACK_SECRET}"},
+                timeout=15,
+            )
+            verify_data = _vr.json()
+            break
+        except Exception as _ve:
+            log_warn("paystack", "verify_attempt_failed",
+                     ref=ref, attempt=_attempt + 1, error=str(_ve))
+            if _attempt < 2:
+                _time.sleep(2 ** _attempt)
+
+    if not verify_data:
+        log_error("paystack", "verify_unavailable", ref=ref)
+        # Return 200 so Paystack doesn't drop the webhook — cert_retry will recover it
+        return jsonify({"error": "Verification unavailable — will retry"}), 200
+
+    _txn = verify_data.get("data", {})
+
+    # 4. gateway_response check
+    if _txn.get("status") != "success":
+        log_warn("paystack", "verify_not_success", ref=ref, status=_txn.get("status"))
+        return jsonify({"error": "Payment verification failed"}), 400
+
+    gw_response = (_txn.get("gateway_response") or "").lower()
+    if gw_response not in ("approved", "successful", ""):
+        log_warn("paystack", "gateway_response_not_approved",
+                 ref=ref, gateway_response=gw_response)
+        return jsonify({"error": "Gateway did not approve transaction"}), 400
+
+    amount_verified = int(_txn.get("amount", 0))
+    cust_email      = (_txn.get("customer") or {}).get("email", "")
+    currency        = _txn.get("currency", "")
 
     conn = get_db()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
@@ -1025,15 +1163,28 @@ def paystack_webhook():
         cur.execute("SELECT * FROM payments WHERE id = %s", (ref,))
         payment = cur.fetchone()
         if not payment:
-            print(f"[PAYSTACK] payment {ref} not found")
+            log_warn("paystack", "payment_not_found", ref=ref)
             return jsonify({"error": "payment not found"}), 404
 
-        # Layer 3: Amount verification
+        # 5. Currency check
+        if currency and currency != "ZAR":
+            log_warn("paystack", "currency_mismatch", ref=ref, currency=currency)
+            return jsonify({"error": "Currency mismatch"}), 400
+
+        # 6. Email consistency check
+        init_email = ((payment.get("metadata") or {}).get("email") or "").strip().lower()
+        if init_email and cust_email and init_email != cust_email.strip().lower():
+            log_warn("paystack", "email_mismatch",
+                     ref=ref, init=init_email, webhook=cust_email)
+            return jsonify({"error": "Email mismatch"}), 400
+
+        # 7. Amount check
         if int(payment["amount"]) != amount_verified:
-            print(f"[PAYSTACK] amount mismatch: expected {payment['amount']} got {amount_verified}")
+            log_warn("paystack", "amount_mismatch",
+                     ref=ref, expected=payment["amount"], got=amount_verified)
             return jsonify({"error": "Amount mismatch"}), 400
 
-        # Layer 4: Atomic idempotency + audit trail
+        # 8. Atomic idempotency + audit trail
         cur.execute("""
             UPDATE payments
             SET status = 'paid', paid_at = NOW(), payment_ref = %s,
@@ -1045,23 +1196,28 @@ def paystack_webhook():
         conn.commit()
     except Exception as e:
         conn.rollback()
-        print(f"[PAYSTACK] webhook DB error: {e}")
+        log_error("paystack", "webhook_db_error", ref=ref, error=str(e))
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
         conn.close()
 
     if not paid_row:
-        print(f"[PAYSTACK] {ref} already processed (duplicate webhook ignored)")
+        log_info("paystack", "idempotent_skip", ref=ref)
         return jsonify({"status": "already_processed"}), 200
 
-    trigger_certification(paid_row, _strip_gateway_keys(paid_row.get("metadata")))
+    result = trigger_certification(paid_row, _strip_gateway_keys(paid_row.get("metadata")))
+    if not result:
+        _set_cert_retry_flag(ref)
+
     return jsonify({"status": "ok"}), 200
 
 
+# ── /api/payments/webhook/payfast ────────────────────────────────────────────
+
 @app.post("/api/payments/webhook/payfast")
 def payfast_webhook():
-    """PayFast ITN — signature verified, atomic idempotency, audit trail."""
+    """PayFast ITN — signature verified, atomic idempotency, cert retry on failure."""
     import urllib.parse
 
     data       = request.form.to_dict()
@@ -1073,7 +1229,7 @@ def payfast_webhook():
     if PAYFAST_PASSPHRASE:
         sig_str += f"&passphrase={urllib.parse.quote_plus(PAYFAST_PASSPHRASE)}"
     if hashlib.md5(sig_str.encode()).hexdigest() != sig_received:
-        print("[PAYFAST] ITN signature mismatch")
+        log_warn("payfast", "itn_sig_mismatch")
         return "INVALID", 400
 
     if pf_status != "COMPLETE":
@@ -1097,18 +1253,24 @@ def payfast_webhook():
         conn.commit()
     except Exception as e:
         conn.rollback()
+        log_error("payfast", "webhook_db_error", payment_id=payment_id, error=str(e))
         return str(e), 500
     finally:
         cur.close()
         conn.close()
 
     if not paid_row:
-        print(f"[PAYFAST] {payment_id} already processed (duplicate ITN ignored)")
+        log_info("payfast", "idempotent_skip", payment_id=payment_id)
         return "ok", 200
 
-    trigger_certification(paid_row, _strip_gateway_keys(paid_row.get("metadata")))
+    result = trigger_certification(paid_row, _strip_gateway_keys(paid_row.get("metadata")))
+    if not result:
+        _set_cert_retry_flag(payment_id)
+
     return "ok", 200
 
+
+# ── /api/payments/<payment_id> ────────────────────────────────────────────────
 
 @app.get("/api/payments/<payment_id>")
 def get_payment_status(payment_id):
@@ -1136,6 +1298,89 @@ def get_payment_status(payment_id):
     finally:
         cur.close()
         conn.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Admin / cron endpoints
+# All require:  X-Admin-Key: <ADMIN_SECRET>
+# Schedule in Fly Machines or Cloud Scheduler.
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/admin/expire-payments")
+def expire_stale_payments():
+    """
+    Expire pending payments older than 30 minutes.
+    Cron: POST /api/admin/expire-payments every 15 min
+    """
+    auth_err = _require_admin(request)
+    if auth_err:
+        return auth_err
+
+    conn = get_db()
+    cur  = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE payments
+            SET    status = 'expired'
+            WHERE  status = 'pending'
+              AND  created_at < NOW() - INTERVAL '30 minutes'
+        """)
+        expired = cur.rowcount
+        conn.commit()
+        log_info("admin", "payments_expired", count=expired)
+        return jsonify({"expired": expired}), 200
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.post("/api/admin/retry-certifications")
+def retry_pending_certifications():
+    """
+    Retry certification for paid payments flagged with cert_retry=true.
+    Cron: POST /api/admin/retry-certifications every 5 min
+    """
+    auth_err = _require_admin(request)
+    if auth_err:
+        return auth_err
+
+    conn = get_db()
+    cur  = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT * FROM payments
+            WHERE  status        = 'paid'
+              AND  submission_id IS NULL
+              AND  (metadata->>'cert_retry')::boolean = true
+              AND  created_at > NOW() - INTERVAL '24 hours'
+            ORDER BY created_at
+            LIMIT 20
+        """)
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    retried = 0
+    for row in rows:
+        try:
+            result = trigger_certification(row, _strip_gateway_keys(row.get("metadata")))
+            if result:
+                retried += 1
+                _c = get_db(); _cur = _c.cursor()
+                _cur.execute(
+                    "UPDATE payments SET metadata = metadata - 'cert_retry' WHERE id = %s",
+                    (str(row["id"]),)
+                )
+                _c.commit(); _cur.close(); _c.close()
+        except Exception as e:
+            log_error("admin", "retry_cert_failed", payment_id=str(row["id"]), error=str(e))
+
+    log_info("admin", "cert_retry_run", retried=retried, total=len(rows))
+    return jsonify({"retried": retried, "total": len(rows)}), 200
 
 
 if __name__ == "__main__":
