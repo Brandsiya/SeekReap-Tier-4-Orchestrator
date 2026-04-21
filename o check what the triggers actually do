@@ -1,5 +1,0 @@
- job_id | status | failure_reason | attempts |         created_at         |    content_id    | job_type | params 
---------+--------+----------------+----------+----------------------------+------------------+----------+--------
-      6 | failed |                |        1 | 2026-03-15 12:55:09.243244 | test_video_final | scan     | {}
-(1 row)
-
