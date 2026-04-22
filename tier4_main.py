@@ -392,12 +392,28 @@ def check_rate_limit(creator_uuid: str) -> tuple:
 
 @app.get("/health")
 def health():
+    problems = {}
+    # DB liveness
     try:
         with db_cursor() as (conn, cur):
             cur.execute("SELECT 1")
-        return jsonify({"status": "ok", "tier": 4})
     except Exception as e:
-        return jsonify({"status": "error", "db": str(e)}), 500
+        problems["db"] = str(e)
+    # Connection pool state
+    try:
+        _p = _get_pool()
+        if _p.closed:
+            problems["pool"] = "closed"
+    except Exception as _pe:
+        problems["pool"] = str(_pe)
+    # Open circuit breakers
+    open_gw = [gw for gw, s in _circuit_state.items()
+               if s.get("open_until", 0) > _time.time()]
+    if open_gw:
+        problems["open_circuits"] = open_gw
+    if problems:
+        return jsonify({"status": "degraded", "tier": 4, "problems": problems}), 500
+    return jsonify({"status": "ok", "tier": 4})
 
 
 @app.post("/api/submit")
@@ -1122,10 +1138,12 @@ def _retry_request(method: str, url: str, gateway: str = "",
     for attempt in range(max_attempts):
         try:
             resp = getattr(requests, method.lower())(url, **kwargs)
-            if resp.status_code < 500:
+            # FIX: only 2xx is success — 4xx passes through as failure
+            if 200 <= resp.status_code < 300:
                 if gateway:
                     _circuit_record_success(gateway)
                 return resp, None
+            last_exc = Exception(f"HTTP {resp.status_code}: non-2xx")
             last_exc = Exception(f"HTTP {resp.status_code}")
         except (requests.exceptions.ConnectionError,
                 requests.exceptions.Timeout) as e:
@@ -1196,6 +1214,17 @@ def ensure_payments_tables():
         # Idempotent column adds for existing deployments
         cur.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS cert_retry_count INTEGER DEFAULT 0")
         cur.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS last_retry_at TIMESTAMP")
+
+        # FIX: indices that make rate-limit queries O(log n) instead of full-table scans
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_submissions_creator_time
+            ON submissions (creator_id, submitted_at DESC)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_payment_events_ip_time
+            ON payment_events ((payload->>'ip'), created_at)
+            WHERE event_type = 'initiate'
+        """)
 
         conn.commit()
 
@@ -1345,12 +1374,17 @@ def trigger_certification(payment_row, pending_meta):
         "payment_id":      str(payment_row["id"]),
     }
     try:
-        r = requests.post(
+        # FIX: use _retry_request so transient failures don't silently drop certs
+        r, _cert_err = _retry_request(
+            "post",
             TIER4_INTERNAL + "/api/certify",
+            gateway="internal",
+            max_attempts=2, timeout=30,
             json=payload,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=30,
         )
+        if r is None:
+            raise Exception(f"certify endpoint unreachable: {_cert_err}")
         data = r.json()
         log_info("payment", "cert_triggered",
                  submission_id=data.get("submission_id"),
@@ -1818,6 +1852,7 @@ def retry_pending_certifications():
               AND (last_retry_at IS NULL OR last_retry_at < NOW() - INTERVAL '5 minutes')
               AND created_at > NOW() - INTERVAL '24 hours'
             ORDER BY created_at LIMIT 20
+            FOR UPDATE SKIP LOCKED
         """)
         rows = cur.fetchall()
 
@@ -1858,6 +1893,20 @@ def retry_pending_certifications():
     log_info("admin", "cert_retry_run", retried=retried, total=len(rows))
     return jsonify({"retried": retried, "total": len(rows)}), 200
 
+
+# ── Graceful shutdown ─────────────────────────────────────────────────────────
+import atexit as _atexit
+
+def _shutdown_pool():
+    global _db_pool
+    if _db_pool and not _db_pool.closed:
+        try:
+            _db_pool.closeall()
+            log_info("db", "pool_closed_on_shutdown")
+        except Exception as _e:
+            log_warn("db", "pool_close_error", error=str(_e))
+
+_atexit.register(_shutdown_pool)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
