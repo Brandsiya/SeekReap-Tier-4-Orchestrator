@@ -1,5 +1,5 @@
 # SeekReap Tier-4 Orchestrator
-# Build: 2026-04-22 — payment hardening rounds 1 + 2 + 3
+# Build: 2026-04-22 — hardened (startup-critical security baseline)
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import uuid, os, json, psycopg2, re, requests, random, string, hmac, hashlib, secrets
@@ -10,6 +10,10 @@ from datetime import datetime
 
 load_dotenv()
 app = Flask(__name__)
+
+# ── Request body size limit (1 MB) ────────────────────────────────────────────
+app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
+
 CORS(app, origins=[
     "https://seekreap-backend-dev.fly.dev",
     "https://seekreap-frontend.onrender.com",
@@ -20,6 +24,10 @@ CORS(app, origins=[
 DAILY_QUOTA = 50
 QUEUE_CAP   = 500
 VALID_PLANS = {"free", "creator", "studio", "payg"}
+VALID_WORK_TYPES = {"audio", "video", "image", "epub", "pdf", "code", "other"}
+
+# Internal call secret — set INTERNAL_SECRET on both sides
+INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -35,13 +43,192 @@ def _log(level, component, event, **kw):
         **kw,
     }))
 
-def log_info(component, event, **kw):  _log("INFO",  component, event, **kw)
-def log_warn(component, event, **kw):  _log("WARN",  component, event, **kw)
-def log_error(component, event, **kw): _log("ERROR", component, event, **kw)
+def log_info(c, e, **kw):  _log("INFO",  c, e, **kw)
+def log_warn(c, e, **kw):  _log("WARN",  c, e, **kw)
+def log_error(c, e, **kw): _log("ERROR", c, e, **kw)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DB
+# Input validation helpers
+# ══════════════════════════════════════════════════════════════════════════════
+
+_EMAIL_RE = re.compile(r'^[^@\s]{1,64}@[^@\s]{1,253}\.[^@\s]{2,}$')
+
+def _valid_email(email: str) -> bool:
+    return bool(email) and bool(_EMAIL_RE.match(email.strip()))
+
+def _valid_uuid(s: str) -> bool:
+    try:
+        uuid.UUID(str(s)); return True
+    except (ValueError, AttributeError):
+        return False
+
+def _clamp_str(s, maxlen: int) -> str:
+    """Trim string to maxlen, return empty string for None."""
+    if not s:
+        return ""
+    return str(s)[:maxlen]
+
+def _validate_certify_body(body: dict) -> tuple:
+    """Returns (error_message, None) or (None, cleaned_body)."""
+    creator_id = _clamp_str(body.get("creator_id") or body.get("supabase_uid"), 128).strip()
+    if not creator_id:
+        return "creator_id required", None
+
+    title = _clamp_str(body.get("title"), 512).strip() or "Untitled Work"
+    plan  = _clamp_str(body.get("plan"), 32).lower().strip() or "free"
+    if plan not in VALID_PLANS:
+        return f"invalid plan '{plan}'", None
+
+    work_type = _clamp_str(body.get("work_type"), 32).lower().strip() or "other"
+    if work_type not in VALID_WORK_TYPES:
+        work_type = "other"
+
+    content_hash = _clamp_str(body.get("content_hash"), 128).strip()
+    artistic_name = _clamp_str(body.get("artistic_name"), 128).strip()
+    email = _clamp_str(body.get("email"), 254).strip()
+
+    collabs = body.get("collaborators") or []
+    if not isinstance(collabs, list):
+        return "collaborators must be an array", None
+    if len(collabs) > 20:
+        return "maximum 20 collaborators allowed", None
+
+    ownership_split = body.get("ownership_split") or {}
+    if not isinstance(ownership_split, dict):
+        return "ownership_split must be an object", None
+    if len(ownership_split) > 21:
+        return "ownership_split too large", None
+
+    return None, {
+        "creator_id":      creator_id,
+        "title":           title,
+        "plan":            plan,
+        "work_type":       work_type,
+        "content_hash":    content_hash,
+        "artistic_name":   artistic_name,
+        "email":           email,
+        "collaborators":   collabs[:20],
+        "ownership_split": ownership_split,
+        "content_url":     _clamp_str(body.get("content_url"), 2048),
+        "payment_id":      _clamp_str(body.get("payment_id"), 128),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# JWT / Supabase token verification
+# ══════════════════════════════════════════════════════════════════════════════
+
+SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")
+
+def _verify_supabase_jwt(token: str) -> dict | None:
+    """
+    Verify a Supabase JWT using the project JWT secret (HS256).
+    Returns the claims dict on success, None on failure.
+    Falls back to permissive mode if SUPABASE_JWT_SECRET is not set
+    (allows local dev without breaking everything).
+    """
+    if not SUPABASE_JWT_SECRET:
+        # Dev mode: no secret configured — skip verification, extract claims manually
+        log_warn("auth", "jwt_secret_not_configured_skipping_verify")
+        try:
+            import base64
+            parts = token.split(".")
+            if len(parts) != 3:
+                return None
+            padded = parts[1] + "=" * (4 - len(parts[1]) % 4)
+            claims = _json.loads(base64.urlsafe_b64decode(padded))
+            return claims
+        except Exception:
+            return None
+
+    try:
+        import base64, struct
+
+        # Manual HS256 verify (no PyJWT dependency required)
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+
+        header_b64, payload_b64, sig_b64 = parts
+
+        # Verify signature
+        msg = f"{header_b64}.{payload_b64}".encode()
+        expected_sig = hmac.new(
+            SUPABASE_JWT_SECRET.encode(), msg, hashlib.sha256
+        ).digest()
+
+        # Decode received sig
+        padded = sig_b64 + "=" * (4 - len(sig_b64) % 4)
+        received_sig = base64.urlsafe_b64decode(padded)
+
+        if not hmac.compare_digest(expected_sig, received_sig):
+            log_warn("auth", "jwt_sig_invalid")
+            return None
+
+        # Decode payload
+        padded2 = payload_b64 + "=" * (4 - len(payload_b64) % 4)
+        claims = _json.loads(base64.urlsafe_b64decode(padded2))
+
+        # Expiry check
+        exp = claims.get("exp")
+        if exp and _time.time() > exp:
+            log_warn("auth", "jwt_expired", exp=exp)
+            return None
+
+        return claims
+
+    except Exception as e:
+        log_warn("auth", "jwt_verify_error", error=str(e))
+        return None
+
+
+def _require_auth(req) -> tuple:
+    """
+    Extracts and verifies Bearer token.
+    Returns (claims_dict, None) on success.
+    Returns (None, error_response_tuple) on failure.
+    """
+    auth_header = req.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None, (jsonify({"error": "Authorization header required"}), 401)
+
+    token = auth_header[7:].strip()
+    claims = _verify_supabase_jwt(token)
+    if not claims:
+        return None, (jsonify({"error": "Invalid or expired token"}), 401)
+
+    return claims, None
+
+
+def _require_internal(req) -> tuple:
+    """
+    For endpoints that should ONLY be called server-to-server internally.
+    Accepts either a valid JWT OR a matching X-Internal-Secret header.
+    Returns (None, error_tuple) if neither is present.
+    """
+    # Internal secret path (trigger_certification uses this)
+    if INTERNAL_SECRET and req.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
+        return {"sub": "internal", "role": "service"}, None
+
+    # Also accept valid JWT for flexibility
+    claims, err = _require_auth(req)
+    if err:
+        return None, (jsonify({"error": "Internal endpoint — not publicly accessible"}), 403)
+    return claims, None
+
+
+def _require_admin(req):
+    """Returns error response tuple if X-Admin-Key is wrong, else None."""
+    ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
+    if not ADMIN_SECRET or req.headers.get("X-Admin-Key") != ADMIN_SECRET:
+        log_warn("admin", "unauthorized", path=req.path, ip=req.remote_addr)
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DB helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
 def get_db():
@@ -69,7 +256,8 @@ def extract_youtube_metadata(url):
         if not m:
             return {}
         video_id = m.group(1)
-        oembed = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        oembed = (f"https://www.youtube.com/oembed"
+                  f"?url=https://www.youtube.com/watch?v={video_id}&format=json")
         resp = requests.get(oembed, timeout=10)
         if resp.status_code != 200:
             return {}
@@ -133,8 +321,7 @@ def insert_submission(data, creator_uuid):
     cur  = conn.cursor(cursor_factory=RealDictCursor)
     try:
         cur.execute("""
-            SELECT id, title, content_preview_url
-            FROM submissions
+            SELECT id, title, content_preview_url FROM submissions
             WHERE creator_id = %s AND content_hash = %s
             ORDER BY submitted_at DESC LIMIT 1
         """, (creator_uuid, content_hash))
@@ -142,7 +329,8 @@ def insert_submission(data, creator_uuid):
         if existing:
             log_info("submit", "dedup_hit",
                      submission_id=str(existing['id']), hash=content_hash)
-            return str(existing["id"]), existing["title"] or content_hash, "", existing["content_preview_url"] or ""
+            return (str(existing["id"]), existing["title"] or content_hash,
+                    "", existing["content_preview_url"] or "")
 
         submission_id = str(uuid.uuid4())
         yt_meta       = extract_youtube_metadata(content_url)
@@ -166,8 +354,7 @@ def insert_submission(data, creator_uuid):
         cur.execute("""
             INSERT INTO job_queue
                 (submission_id, creator_id, content_id, job_type, status, attempts)
-            VALUES (%s, %s, %s, %s, %s, 0)
-            ON CONFLICT DO NOTHING
+            VALUES (%s, %s, %s, %s, %s, 0) ON CONFLICT DO NOTHING
         """, (submission_id, creator_uuid, content_url, "fingerprint", "pending"))
         conn.commit()
     except Exception as e:
@@ -207,11 +394,8 @@ def check_rate_limit(creator_uuid: str) -> tuple:
 @app.get("/health")
 def health():
     try:
-        conn = get_db()
-        cur  = conn.cursor()
-        cur.execute("SELECT 1")
-        cur.close()
-        conn.close()
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("SELECT 1"); cur.close(); conn.close()
         return jsonify({"status": "ok", "tier": 4})
     except Exception as e:
         return jsonify({"status": "error", "db": str(e)}), 500
@@ -219,10 +403,17 @@ def health():
 
 @app.post("/api/submit")
 def submit():
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
     try:
-        data         = request.get_json()
-        firebase_uid = data.get("creator_id", "")
-        conn         = get_db()
+        data         = request.get_json(force=True) or {}
+        firebase_uid = claims.get("sub", data.get("creator_id", ""))
+        if not firebase_uid:
+            return jsonify({"error": "creator_id required"}), 400
+
+        conn = get_db()
         try:
             creator_uuid = get_or_create_creator(conn, firebase_uid,
                                                   data.get("email"), data.get("name"))
@@ -235,12 +426,9 @@ def submit():
 
         submission_id, title, channel, thumbnail_url = insert_submission(data, creator_uuid)
         return jsonify({
-            "submission_id": submission_id,
-            "status":        "pending",
-            "creator_uuid":  creator_uuid,
-            "title":         title,
-            "channel":       channel,
-            "thumbnail_url": thumbnail_url,
+            "submission_id": submission_id, "status": "pending",
+            "creator_uuid":  creator_uuid,  "title":  title,
+            "channel":       channel,        "thumbnail_url": thumbnail_url,
         })
     except Exception as e:
         log_error("submit", "unhandled", error=str(e))
@@ -249,22 +437,62 @@ def submit():
 
 @app.post("/api/certify")
 def certify_work():
+    """
+    PUBLIC for free plan (requires valid JWT).
+    INTERNAL for paid plans (requires X-Internal-Secret OR valid JWT).
+    The distinction matters: paid plans are triggered by the webhook,
+    not directly by users, so we accept internal secret too.
+    """
+    # Accept either a valid user JWT or the internal secret
+    auth_header = request.headers.get("Authorization", "")
+    internal_ok = (INTERNAL_SECRET and
+                   request.headers.get("X-Internal-Secret") == INTERNAL_SECRET)
+
+    if not internal_ok:
+        claims, err = _require_auth(request)
+        if err:
+            return err
+        token_sub = claims.get("sub", "")
+    else:
+        token_sub = None  # internal call — don't enforce sub match
+
     body = request.get_json(force=True) or {}
+    error_msg, cleaned = _validate_certify_body(body)
+    if error_msg:
+        return jsonify({"error": error_msg}), 400
 
-    creator_id_raw  = (body.get("creator_id") or body.get("supabase_uid") or "").strip()
-    title           = (body.get("title") or "Untitled Work").strip()
-    plan            = body.get("plan", "free").lower().strip()
-    work_type       = (body.get("work_type") or "other").strip()
-    artistic_name   = (body.get("artistic_name") or "").strip()
-    content_hash    = (body.get("content_hash") or "").strip()
-    collaborators   = body.get("collaborators") or []
-    ownership_split = body.get("ownership_split") or {}
-    email           = (body.get("email") or "").strip()
+    creator_id_raw = cleaned["creator_id"]
+    plan           = cleaned["plan"]
 
-    if not creator_id_raw:
-        return jsonify({"error": "creator_id required"}), 400
-    if plan not in VALID_PLANS:
-        return jsonify({"error": f"invalid plan '{plan}'"}), 400
+    # Ownership enforcement: for non-internal calls, JWT sub must match creator_id
+    if not internal_ok and token_sub:
+        try:
+            token_uuid = str(uuid.UUID(token_sub))
+        except (ValueError, AttributeError):
+            token_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, token_sub))
+        try:
+            req_uuid = str(uuid.UUID(creator_id_raw))
+        except (ValueError, AttributeError):
+            req_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, creator_id_raw))
+
+        if token_uuid != req_uuid:
+            log_warn("certify", "ownership_mismatch",
+                     token_sub=token_sub, creator_id=creator_id_raw,
+                     ip=request.remote_addr)
+            return jsonify({"error": "Forbidden — creator_id does not match token"}), 403
+
+    # Paid plans submitted directly (not via internal) are rejected
+    if not internal_ok and plan != "free":
+        log_warn("certify", "paid_plan_direct_attempt",
+                 plan=plan, creator_id=creator_id_raw, ip=request.remote_addr)
+        return jsonify({
+            "error": "Paid plans must go through the payment system. "
+                     "Use /api/payments/initiate instead."
+        }), 403
+
+    # Dedup check for certify_work path
+    title        = cleaned["title"]
+    content_hash = cleaned["content_hash"]
 
     try:
         creator_uuid = str(uuid.UUID(creator_id_raw))
@@ -276,14 +504,41 @@ def certify_work():
             f"{creator_uuid}:{title}:{datetime.utcnow().isoformat()}".encode()
         ).hexdigest()
 
-    suffix      = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
-    cert_id     = f"SR-{datetime.utcnow().strftime('%Y%m%d')}-{suffix}"
-    content_url = body.get("content_url") or f"seekreap://local/{content_hash}"
-
     conn = get_db()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
     try:
+        # Dedup: same creator + same content_hash within 24h → return existing
+        if content_hash and content_hash != "":
+            cur.execute("""
+                SELECT id, cert_id, plan, status FROM submissions
+                WHERE creator_id = %s
+                  AND content_hash = %s
+                  AND submitted_at > NOW() - INTERVAL '24 hours'
+                  AND plan = %s
+                ORDER BY submitted_at DESC LIMIT 1
+            """, (creator_uuid, content_hash, plan))
+            existing = cur.fetchone()
+            if existing:
+                log_info("certify", "dedup_hit",
+                         submission_id=str(existing["id"]),
+                         cert_id=existing["cert_id"])
+                return jsonify({
+                    "submission_id": str(existing["id"]),
+                    "cert_id":       existing["cert_id"],
+                    "plan":          existing["plan"],
+                    "status":        existing["status"],
+                    "qr_url":        f"/api/qrcode/{existing['cert_id']}",
+                    "message":       "Certification already queued (deduplicated)",
+                }), 202
+
+        suffix  = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        cert_id = f"SR-{datetime.utcnow().strftime('%Y%m%d')}-{suffix}"
+        content_url = cleaned["content_url"] or f"seekreap://local/{content_hash}"
+
+        email         = cleaned["email"]
+        artistic_name = cleaned["artistic_name"]
         creator_email = email or f"{creator_uuid[:8]}@seekreap.local"
+
         try:
             cur.execute("""
                 INSERT INTO creators (id, email, name)
@@ -298,6 +553,9 @@ def certify_work():
                 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
             """, (creator_uuid, f"{creator_uuid[:8]}@seekreap.local", artistic_name or title))
 
+        collaborators   = cleaned["collaborators"]
+        ownership_split = cleaned["ownership_split"]
+
         cur.execute("""
             INSERT INTO submissions
                (id, creator_id, content_url, content_hash, title,
@@ -306,10 +564,10 @@ def certify_work():
             VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s)
             RETURNING id
         """, (creator_uuid, content_url, content_hash, title,
-              plan, artistic_name, work_type, cert_id,
+              plan, artistic_name, cleaned["work_type"], cert_id,
               Json(collaborators) if collaborators else None,
               Json(ownership_split) if ownership_split else None,
-              work_type))
+              cleaned["work_type"]))
 
         row           = cur.fetchone()
         submission_id = str(row["id"])
@@ -352,11 +610,30 @@ def certify_work():
 
 @app.get("/api/certify/<submission_id>")
 def certify_status(submission_id):
+    """
+    Public read — but enforces creator ownership so users
+    can only poll their own submissions.
+    Internal callers (X-Internal-Secret) bypass ownership check.
+    """
+    internal_ok = (INTERNAL_SECRET and
+                   request.headers.get("X-Internal-Secret") == INTERNAL_SECRET)
+
+    if not internal_ok:
+        claims, err = _require_auth(request)
+        if err:
+            return err
+        token_sub = claims.get("sub", "")
+    else:
+        token_sub = None
+
+    if not _valid_uuid(submission_id):
+        return jsonify({"error": "invalid submission_id"}), 400
+
     conn = get_db()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
     try:
         cur.execute("""
-            SELECT id, status, cert_id, title, work_type, plan,
+            SELECT id, creator_id, status, cert_id, title, work_type, plan,
                    artistic_name, overall_risk_score, risk_level,
                    submitted_at, completed_at, failure_reason
             FROM submissions WHERE id = %s
@@ -364,8 +641,23 @@ def certify_status(submission_id):
         row = cur.fetchone()
         if not row:
             return jsonify({"error": "not found"}), 404
+
+        # Ownership check — compare normalised UUIDs
+        if not internal_ok and token_sub:
+            try:
+                token_uuid = str(uuid.UUID(token_sub))
+            except Exception:
+                token_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, token_sub))
+            row_creator = str(row["creator_id"])
+            if token_uuid != row_creator:
+                log_warn("certify_status", "ownership_denied",
+                         token_sub=token_sub,
+                         creator_id=row_creator)
+                return jsonify({"error": "not found"}), 404  # don't leak existence
+
         data = dict(row)
-        data["id"] = str(data["id"])
+        data["id"]         = str(data["id"])
+        data["creator_id"] = str(data["creator_id"])
         for k in ("submitted_at", "completed_at"):
             if data[k]:
                 data[k] = data[k].isoformat()
@@ -377,6 +669,9 @@ def certify_status(submission_id):
 
 @app.get("/api/status/<submission_id>")
 def status(submission_id):
+    if not _valid_uuid(submission_id):
+        return jsonify({"error": "invalid submission_id"}), 400
+
     conn = get_db()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
     try:
@@ -390,7 +685,6 @@ def status(submission_id):
             WHERE s.id = %s
         """, (submission_id,))
         row = cur.fetchone()
-
         cur.execute("""
             SELECT cm.matched_submission_id, cm.similarity_score,
                    cm.match_type, cm.fingerprint_version, cm.detected_at,
@@ -420,7 +714,8 @@ def status(submission_id):
     result["yt_channel"]     = meta.get("channel", "")
     result["yt_duration"]    = meta.get("duration")
     result["yt_upload_date"] = meta.get("upload_date", "")
-    result["yt_thumbnail"]   = meta.get("thumbnail_url", "") or result.get("content_preview_url", "")
+    result["yt_thumbnail"]   = (meta.get("thumbnail_url", "")
+                                 or result.get("content_preview_url", ""))
     result["yt_id"]          = meta.get("youtube_id", "")
     result["matches"] = [
         {
@@ -428,7 +723,8 @@ def status(submission_id):
             "similarity_score":      float(m["similarity_score"]),
             "match_type":            m["match_type"],
             "fingerprint_version":   m["fingerprint_version"],
-            "detected_at":           m["detected_at"].isoformat() if m["detected_at"] else None,
+            "detected_at":           (m["detected_at"].isoformat()
+                                      if m["detected_at"] else None),
             "matched_title":         m["matched_title"] or "",
             "matched_url":           m["matched_url"] or "",
             "severity":              m["severity"] or "medium",
@@ -441,14 +737,19 @@ def status(submission_id):
 
 @app.get("/api/submissions")
 def list_submissions():
-    creator_id = request.headers.get('X-Creator-ID') or request.args.get('creator_id')
-    if not creator_id:
-        return jsonify({"error": "X-Creator-ID header required"}), 400
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
+    # Use JWT sub as authoritative creator_id — ignore header/query to prevent spoofing
+    token_sub = claims.get("sub", "")
+    if not token_sub:
+        return jsonify({"error": "Token missing sub claim"}), 401
 
     try:
-        creator_uuid = str(uuid.UUID(creator_id))
+        creator_uuid = str(uuid.UUID(token_sub))
     except ValueError:
-        creator_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, creator_id))
+        creator_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, token_sub))
 
     conn = get_db()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
@@ -478,8 +779,10 @@ def list_submissions():
                     "status":             (r["status"] or "").upper(),
                     "overall_risk_score": r["overall_risk_score"],
                     "risk_level":         r["risk_level"],
-                    "submitted_at":       r["submitted_at"].isoformat() if r["submitted_at"] else None,
-                    "completed_at":       r["completed_at"].isoformat() if r["completed_at"] else None,
+                    "submitted_at":       (r["submitted_at"].isoformat()
+                                          if r["submitted_at"] else None),
+                    "completed_at":       (r["completed_at"].isoformat()
+                                          if r["completed_at"] else None),
                     "title":              r["title"],
                     "channel":            r["channel"],
                     "thumbnail":          r["thumbnail"],
@@ -520,15 +823,20 @@ def latency_metrics():
         row = cur.fetchone()
         cur.execute("SELECT COUNT(*) AS cnt FROM job_queue WHERE status IN ('pending','processing')")
         queue_depth = cur.fetchone()["cnt"]
-        cur.execute("SELECT COUNT(*) AS cnt FROM job_queue WHERE status='failed' AND created_at >= NOW() - INTERVAL '24 hours'")
+        cur.execute("""SELECT COUNT(*) AS cnt FROM job_queue
+                       WHERE status='failed' AND created_at >= NOW() - INTERVAL '24 hours'""")
         failed_24h = cur.fetchone()["cnt"]
         return jsonify({
             "latency_7d": {
                 "total_completed": int(row["total_completed"] or 0),
-                "avg_seconds":     float(row["avg_seconds"]) if row["avg_seconds"] is not None else None,
-                "p95_seconds":     float(row["p95_seconds"]) if row["p95_seconds"] is not None else None,
-                "min_seconds":     float(row["min_seconds"]) if row["min_seconds"] is not None else None,
-                "max_seconds":     float(row["max_seconds"]) if row["max_seconds"] is not None else None,
+                "avg_seconds":     (float(row["avg_seconds"])
+                                    if row["avg_seconds"] is not None else None),
+                "p95_seconds":     (float(row["p95_seconds"])
+                                    if row["p95_seconds"] is not None else None),
+                "min_seconds":     (float(row["min_seconds"])
+                                    if row["min_seconds"] is not None else None),
+                "max_seconds":     (float(row["max_seconds"])
+                                    if row["max_seconds"] is not None else None),
             },
             "queue_depth": queue_depth,
             "failed_24h":  failed_24h,
@@ -543,9 +851,17 @@ def latency_metrics():
 
 @app.post("/api/finalize")
 def finalize():
-    data          = request.get_json()
-    submission_id = data["submission_id"]
-    analysis      = data["analysis"]
+    claims, err = _require_internal(request)
+    if err:
+        return err
+
+    data          = request.get_json(force=True) or {}
+    submission_id = data.get("submission_id", "")
+    analysis      = data.get("analysis") or {}
+
+    if not _valid_uuid(submission_id):
+        return jsonify({"error": "invalid submission_id"}), 400
+
     conn = get_db()
     cur  = conn.cursor()
     try:
@@ -555,8 +871,8 @@ def finalize():
             WHERE id=%s RETURNING id
         """, (analysis.get("risk_score"), analysis.get("risk_level"), submission_id))
         updated = cur.fetchone()
-        cur.execute("UPDATE job_queue SET status='completed', completed_at=NOW() WHERE submission_id=%s",
-                    (submission_id,))
+        cur.execute("UPDATE job_queue SET status='completed', completed_at=NOW() "
+                    "WHERE submission_id=%s", (submission_id,))
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -564,11 +880,16 @@ def finalize():
     finally:
         cur.close()
         conn.close()
-    return jsonify({"status": "updated"}) if updated else (jsonify({"error": "not found"}), 404)
+    return (jsonify({"status": "updated"}) if updated
+            else (jsonify({"error": "not found"}), 404))
 
 
 @app.post("/api/admin/recover-stuck-jobs")
 def recover_stuck_jobs():
+    auth_err = _require_admin(request)
+    if auth_err:
+        return auth_err
+
     conn = get_db()
     cur  = conn.cursor()
     try:
@@ -582,7 +903,8 @@ def recover_stuck_jobs():
         """)
         recovered = cur.fetchall()
         conn.commit()
-        return jsonify({"recovered": len(recovered), "job_ids": [r[0] for r in recovered]})
+        return jsonify({"recovered": len(recovered),
+                        "job_ids": [r[0] for r in recovered]})
     except Exception as e:
         conn.rollback()
         return jsonify({"error": str(e)}), 500
@@ -593,6 +915,9 @@ def recover_stuck_jobs():
 
 @app.get("/api/verify-proof/<submission_id>")
 def verify_blockchain_proof(submission_id):
+    if not _valid_uuid(submission_id):
+        return jsonify({"error": "invalid submission_id"}), 400
+
     conn = get_db()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
     try:
@@ -631,7 +956,10 @@ def generate_qrcode(cert_id):
     import qrcode
     from io import BytesIO
     from flask import send_file
-    verify_url = f"https://seekreap-frontend.onrender.com/verification_portal.html?cert={cert_id}"
+    if not re.match(r'^SR-\d{8}-[A-Z0-9]{8}$', cert_id):
+        return jsonify({"error": "invalid cert_id"}), 400
+    verify_url = (f"https://seekreap-frontend.onrender.com"
+                  f"/verification_portal.html?cert={cert_id}")
     qr = qrcode.QRCode(version=1, box_size=10, border=4)
     qr.add_data(verify_url)
     qr.make(fit=True)
@@ -652,13 +980,19 @@ def generate_invite_token():
 
 @app.post("/api/certify/invites")
 def create_collaborator_invites():
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
     body           = request.get_json(force=True) or {}
     collaborators  = body.get("collaborators", [])
-    certificate_id = body.get("certificate_id")
-    invited_by     = body.get("creator_id")
+    certificate_id = _clamp_str(body.get("certificate_id"), 128).strip()
+    invited_by     = claims.get("sub", "")  # authoritative from token
 
-    if not collaborators:
+    if not isinstance(collaborators, list) or len(collaborators) == 0:
         return jsonify({"error": "No collaborators provided"}), 400
+    if len(collaborators) > 20:
+        return jsonify({"error": "Maximum 20 collaborators"}), 400
     if not certificate_id:
         return jsonify({"error": "certificate_id required"}), 400
     if not invited_by:
@@ -669,6 +1003,13 @@ def create_collaborator_invites():
     invites_created = []
     try:
         for collab in collaborators:
+            collab_email = _clamp_str(collab.get("email"), 254).strip()
+            if not _valid_email(collab_email):
+                return jsonify({"error": f"Invalid email: {collab_email}"}), 400
+            split = collab.get("split")
+            if not isinstance(split, (int, float)) or not (1 <= int(split) <= 99):
+                return jsonify({"error": "split must be 1-99"}), 400
+
             token = generate_invite_token()
             cur.execute("""
                 INSERT INTO collaboration_invites
@@ -677,22 +1018,27 @@ def create_collaborator_invites():
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
                 RETURNING id, token
             """, (
-                collab.get("email"), collab.get("fullName"), collab.get("artisticName"),
-                collab.get("title"), collab.get("gender"), collab.get("country"),
-                collab.get("ownershipTitle"), collab.get("split"),
+                collab_email,
+                _clamp_str(collab.get("fullName"), 128),
+                _clamp_str(collab.get("artisticName"), 128),
+                _clamp_str(collab.get("title"), 32),
+                _clamp_str(collab.get("gender"), 32),
+                _clamp_str(collab.get("country"), 64),
+                _clamp_str(collab.get("ownershipTitle"), 128),
+                int(split),
                 certificate_id, invited_by, token,
             ))
             result = cur.fetchone()
             invites_created.append({
                 "id": result["id"], "token": result["token"],
-                "email": collab.get("email"), "artistic_name": collab.get("artisticName"),
+                "email": collab_email,
+                "artistic_name": _clamp_str(collab.get("artisticName"), 128),
             })
             log_info("invite", "queued",
-                     email=collab.get("email"), token_prefix=token[:16])
+                     email=collab_email, token_prefix=token[:16])
         conn.commit()
         return jsonify({
-            "success": True,
-            "invites": invites_created,
+            "success": True, "invites": invites_created,
             "message": f"Created {len(invites_created)} collaborator invites",
         }), 201
     except Exception as e:
@@ -705,7 +1051,7 @@ def create_collaborator_invites():
 
 @app.get("/api/invite")
 def get_invite():
-    token = request.args.get('token')
+    token = _clamp_str(request.args.get('token'), 128).strip()
     if not token:
         return jsonify({"error": "token required"}), 400
 
@@ -739,13 +1085,19 @@ def get_invite():
 
 @app.post("/api/invite/accept")
 def accept_invite():
-    body       = request.get_json(force=True) or {}
-    token      = body.get("token")
-    user_id    = body.get("user_id")
-    user_email = body.get("email")
+    claims, err = _require_auth(request)
+    if err:
+        return err
 
-    if not token or not user_id:
-        return jsonify({"error": "token and user_id required"}), 400
+    body       = request.get_json(force=True) or {}
+    token      = _clamp_str(body.get("token"), 128).strip()
+    user_id    = claims.get("sub", "")   # authoritative from JWT
+    user_email = _clamp_str(body.get("email"), 254).strip()
+
+    if not token:
+        return jsonify({"error": "token required"}), 400
+    if not user_id:
+        return jsonify({"error": "Token missing sub claim"}), 401
 
     conn = get_db()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
@@ -779,7 +1131,8 @@ def accept_invite():
                 INSERT INTO profiles (id, full_name, artistic_name, title, gender, country)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
-                    full_name = EXCLUDED.full_name, artistic_name = EXCLUDED.artistic_name,
+                    full_name = EXCLUDED.full_name,
+                    artistic_name = EXCLUDED.artistic_name,
                     title = EXCLUDED.title, gender = EXCLUDED.gender,
                     country = EXCLUDED.country, updated_at = NOW()
             """, (user_id, invite.get("full_name"), invite.get("artistic_name"),
@@ -799,7 +1152,7 @@ def accept_invite():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Payment system — hardened (rounds 1 + 2 + 3)
+# Payment system
 # ══════════════════════════════════════════════════════════════════════════════
 
 PAYSTACK_SECRET      = os.environ.get("PAYSTACK_SECRET_KEY", "")
@@ -808,33 +1161,20 @@ PAYFAST_MERCHANT_KEY = os.environ.get("PAYFAST_MERCHANT_KEY", "")
 PAYFAST_PASSPHRASE   = os.environ.get("PAYFAST_PASSPHRASE", "")
 FRONTEND_URL         = os.environ.get("FRONTEND_URL", "https://seekreap-frontend.onrender.com")
 TIER4_INTERNAL       = os.environ.get("TIER4_INTERNAL", "https://seekreap-tier-4-dev.fly.dev")
-ADMIN_SECRET         = os.environ.get("ADMIN_SECRET", "")
 
-# Server-authoritative ZAR cent pricing — client value is always ignored
-PLAN_AMOUNTS = {
-    "payg":    199,
-    "creator": 999,
-    "studio":  2999,
-}
+PLAN_AMOUNTS = {"payg": 199, "creator": 999, "studio": 2999}
 
-# Disposable/temporary email domains to reject at payment initiation
 _DISPOSABLE_DOMAINS = {
     "mailinator.com", "guerrillamail.com", "tempmail.com", "throwam.com",
-    "trashmail.com", "sharklasers.com", "guerrillamailblock.com", "grr.la",
-    "guerrillamail.info", "spam4.me", "yopmail.com", "yopmail.fr",
-    "cool.fr.nf", "jetable.fr.nf", "nospam.ze.tc", "nomail.xl.cx",
-    "mega.zik.dj", "speed.1s.fr", "courriel.fr.nf", "moncourrier.fr.nf",
-    "dispostable.com", "mailnull.com", "spamgourmet.com", "spamgourmet.net",
-    "maildrop.cc", "discard.email", "getnada.com", "mohmal.com",
-    "fakeinbox.com", "mytemp.email", "tempinbox.com", "throwam.com",
-    "spamherelots.com", "spamhereplease.com", "spam.la", "thisisnotmyrealemail.com",
+    "trashmail.com", "sharklasers.com", "yopmail.com", "yopmail.fr",
+    "spam4.me", "dispostable.com", "mailnull.com", "maildrop.cc",
+    "discard.email", "getnada.com", "fakeinbox.com", "mytemp.email",
+    "spamgourmet.com", "spamgourmet.net", "mohmal.com",
 }
-
 
 def _is_disposable_email(email: str) -> bool:
     try:
-        domain = email.strip().lower().split("@")[-1]
-        return domain in _DISPOSABLE_DOMAINS
+        return email.strip().lower().split("@")[-1] in _DISPOSABLE_DOMAINS
     except Exception:
         return False
 
@@ -843,7 +1183,6 @@ def ensure_payments_tables():
     conn = get_db()
     cur  = conn.cursor()
     try:
-        # Main payments table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS payments (
                 id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -863,8 +1202,6 @@ def ensure_payments_tables():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_payments_payment_ref ON payments(payment_ref)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_payments_creator_id  ON payments(creator_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_payments_status      ON payments(status)")
-
-        # Separate audit event log — keeps metadata lean
         cur.execute("""
             CREATE TABLE IF NOT EXISTS payment_events (
                 id         BIGSERIAL PRIMARY KEY,
@@ -876,6 +1213,15 @@ def ensure_payments_tables():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pe_payment_id ON payment_events(payment_id)")
+
+        # Replay prevention: store processed webhook event IDs
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS webhook_events (
+                id          TEXT PRIMARY KEY,
+                gateway     TEXT NOT NULL,
+                processed_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
         conn.commit()
     finally:
         cur.close()
@@ -889,8 +1235,7 @@ except Exception as _e:
     log_warn("payment", "table_init_warning", error=str(_e))
 
 
-def _log_payment_event(payment_id: str, event_type: str, gateway: str, payload: dict):
-    """Write a row to payment_events. Non-fatal — never raises."""
+def _log_payment_event(payment_id, event_type, gateway, payload):
     try:
         _c = get_db(); _cur = _c.cursor()
         _cur.execute("""
@@ -903,23 +1248,29 @@ def _log_payment_event(payment_id: str, event_type: str, gateway: str, payload: 
                  payment_id=payment_id, event=event_type, error=str(_e))
 
 
-def _require_admin(req):
-    """Returns 401 response tuple if X-Admin-Key is wrong, else None."""
-    if not ADMIN_SECRET or req.headers.get("X-Admin-Key") != ADMIN_SECRET:
-        log_warn("admin", "unauthorized", path=req.path, ip=req.remote_addr)
-        return jsonify({"error": "Unauthorized"}), 401
-    return None
+def _check_replay(event_id: str, gateway: str) -> bool:
+    """
+    Returns True if this event_id was already processed (replay).
+    Inserts a new row atomically — safe under concurrent requests.
+    """
+    try:
+        _c = get_db(); _cur = _c.cursor()
+        _cur.execute("""
+            INSERT INTO webhook_events (id, gateway)
+            VALUES (%s, %s)
+            ON CONFLICT (id) DO NOTHING
+        """, (event_id, gateway))
+        inserted = _cur.rowcount
+        _c.commit(); _cur.close(); _c.close()
+        return inserted == 0  # 0 rows inserted → already existed → replay
+    except Exception as _e:
+        log_warn("payment", "replay_check_error", error=str(_e))
+        return False  # fail open — don't block legitimate events
 
 
 def select_gateway(data):
-    """
-    ZA country or ZAR currency → PayFast  (better local conversion)
-    Global                     → Paystack
-    Neither configured         → None     (caller raises 502)
-    """
     country  = (data.get("country") or "").upper().strip()
     currency = (data.get("currency") or "ZAR").upper().strip()
-
     if (country == "ZA" or currency == "ZAR") and PAYFAST_MERCHANT_ID and PAYFAST_MERCHANT_KEY:
         return "payfast"
     if PAYSTACK_SECRET:
@@ -942,7 +1293,7 @@ def init_paystack(payment_id, data):
         },
     }
     try:
-        r = requests.post(
+        r    = requests.post(
             "https://api.paystack.co/transaction/initialize",
             headers={"Authorization": f"Bearer {PAYSTACK_SECRET}",
                      "Content-Type": "application/json"},
@@ -989,7 +1340,6 @@ def init_payfast(payment_id, data):
 
 
 def _set_cert_retry_flag(payment_id_str):
-    """Flag a paid payment for cert retry. Non-fatal."""
     try:
         _c = get_db(); _cur = _c.cursor()
         _cur.execute(
@@ -1003,11 +1353,6 @@ def _set_cert_retry_flag(payment_id_str):
 
 
 def trigger_certification(payment_row, pending_meta):
-    """
-    Post to /api/certify internally after payment confirmed.
-    Returns certify dict on success, None on failure.
-    Callers must call _set_cert_retry_flag() when this returns None.
-    """
     meta    = pending_meta or {}
     payload = {
         "creator_id":      payment_row["creator_id"],
@@ -1022,10 +1367,16 @@ def trigger_certification(payment_row, pending_meta):
         "payment_id":      str(payment_row["id"]),
     }
     try:
-        r    = requests.post(TIER4_INTERNAL + "/api/certify", json=payload, timeout=30)
+        r = requests.post(
+            TIER4_INTERNAL + "/api/certify",
+            json=payload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=30,
+        )
         data = r.json()
         log_info("payment", "cert_triggered",
-                 submission_id=data.get("submission_id"), cert_id=data.get("cert_id"))
+                 submission_id=data.get("submission_id"),
+                 cert_id=data.get("cert_id"))
         conn = get_db(); cur = conn.cursor()
         try:
             cur.execute("UPDATE payments SET submission_id = %s WHERE id = %s",
@@ -1043,58 +1394,81 @@ def trigger_certification(payment_row, pending_meta):
 
 @app.post("/api/payments/initiate")
 def initiate_payment():
-    """
-    Frontend entry point for paid plans.
-    Amount is ALWAYS derived server-side — client value is ignored.
-    """
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
     body = request.get_json(force=True) or {}
 
-    creator_id = (body.get("creator_id") or "").strip()
-    plan       = (body.get("plan") or "free").lower().strip()
-    email      = (body.get("email") or "").strip()
+    plan  = _clamp_str(body.get("plan"), 32).lower().strip()
+    email = _clamp_str(body.get("email"), 254).strip()
 
+    # creator_id is authoritative from JWT, not the request body
+    creator_id = claims.get("sub", "")
     if not creator_id:
-        return jsonify({"error": "creator_id required"}), 400
+        return jsonify({"error": "Token missing sub claim"}), 401
+
     if plan == "free":
         return jsonify({"error": "Free plan does not require payment"}), 400
     if plan not in PLAN_AMOUNTS:
         return jsonify({"error": f"Unknown plan '{plan}'"}), 400
     if not email:
         return jsonify({"error": "email required"}), 400
-
-    # ── Fraud: reject disposable email domains ────────────────────────────────
+    if not _valid_email(email):
+        return jsonify({"error": "Invalid email address"}), 400
     if _is_disposable_email(email):
         log_warn("fraud", "disposable_email",
                  email=email, creator_id=creator_id, ip=request.remote_addr)
         return jsonify({"error": "Please use a permanent email address for payment."}), 400
 
-    # ── Rate limit 1: max 5 pending payments per creator per hour ─────────────
+    # Idempotency: if identical pending payment exists within 5 min, return it
+    try:
+        _idem = get_db(); _idemc = _idem.cursor(cursor_factory=RealDictCursor)
+        _idemc.execute("""
+            SELECT id FROM payments
+            WHERE creator_id = %s AND plan = %s AND status = 'pending'
+              AND created_at > NOW() - INTERVAL '5 minutes'
+            ORDER BY created_at DESC LIMIT 1
+        """, (creator_id, plan))
+        existing_payment = _idemc.fetchone()
+        _idemc.close(); _idem.close()
+        if existing_payment:
+            existing_id = str(existing_payment["id"])
+            log_info("payment", "idempotent_reuse", payment_id=existing_id)
+            data = {**body, "amount": PLAN_AMOUNTS[plan], "email": email,
+                    "creator_id": creator_id}
+            gateway = select_gateway(body)
+            if gateway == "paystack":
+                return init_paystack(existing_id, data)
+            if gateway == "payfast":
+                return init_payfast(existing_id, data)
+    except Exception as _ie:
+        log_warn("payment", "idempotency_check_failed", error=str(_ie))
+
+    # Rate limit: max 5 pending payments per creator per hour
     try:
         _rl = get_db(); _rlc = _rl.cursor()
         _rlc.execute("""
             SELECT COUNT(*) FROM payments
-            WHERE creator_id = %s
-              AND status     = 'pending'
+            WHERE creator_id = %s AND status = 'pending'
               AND created_at > NOW() - INTERVAL '1 hour'
         """, (creator_id,))
         if _rlc.fetchone()[0] >= 5:
             _rlc.close(); _rl.close()
-            log_warn("fraud", "creator_rate_limit",
-                     creator_id=creator_id, ip=request.remote_addr)
             return jsonify({"error": "Too many pending payments. Complete or wait before retrying."}), 429
         _rlc.close(); _rl.close()
     except Exception as _e:
         log_warn("payment", "rate_limit_check_failed", error=str(_e))
 
-    # ── Rate limit 2: max 10 attempts per IP per hour ─────────────────────────
-    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+    # Rate limit: max 10 initiations per IP per hour
+    client_ip = (request.headers.get("X-Forwarded-For", request.remote_addr or "")
+                 .split(",")[0].strip())
     if client_ip:
         try:
             _rl2 = get_db(); _rlc2 = _rl2.cursor()
             _rlc2.execute("""
                 SELECT COUNT(*) FROM payment_events
-                WHERE event_type = 'initiate'
-                  AND (payload->>'ip') = %s
+                WHERE event_type = 'initiate' AND (payload->>'ip') = %s
                   AND created_at > NOW() - INTERVAL '1 hour'
             """, (client_ip,))
             if _rlc2.fetchone()[0] >= 10:
@@ -1112,12 +1486,12 @@ def initiate_payment():
 
     pending_meta = {
         "email":           email,
-        "title":           body.get("title", "Untitled Work"),
-        "work_type":       body.get("work_type", "other"),
-        "content_hash":    body.get("content_hash", ""),
-        "collaborators":   body.get("collaborators", []),
-        "ownership_split": body.get("ownership_split", {}),
-        "artistic_name":   body.get("artistic_name", ""),
+        "title":           _clamp_str(body.get("title"), 512),
+        "work_type":       _clamp_str(body.get("work_type"), 32).lower() or "other",
+        "content_hash":    _clamp_str(body.get("content_hash"), 128),
+        "collaborators":   (body.get("collaborators") or [])[:20],
+        "ownership_split": body.get("ownership_split") or {},
+        "artistic_name":   _clamp_str(body.get("artistic_name"), 128),
     }
 
     conn = get_db()
@@ -1137,12 +1511,10 @@ def initiate_payment():
         cur.close()
         conn.close()
 
-    # Log initiate event for IP rate-limit tracking
-    _log_payment_event(payment_id, "initiate", gateway, {
-        "ip": client_ip, "plan": plan, "creator_id": creator_id
-    })
+    _log_payment_event(payment_id, "initiate", gateway,
+                       {"ip": client_ip, "plan": plan, "creator_id": creator_id})
 
-    data = {**body, "amount": amount, "email": email}
+    data = {**body, "amount": amount, "email": email, "creator_id": creator_id}
     if gateway == "paystack":
         return init_paystack(payment_id, data)
     if gateway == "payfast":
@@ -1154,22 +1526,10 @@ def initiate_payment():
 
 @app.post("/api/payments/webhook/paystack")
 def paystack_webhook():
-    """
-    Layered security:
-      1. HMAC-SHA512 signature
-      2. Reversal/refund event routing
-      3. Server-side verify (3 retries + backoff)
-      4. gateway_response must be Approved/Successful
-      5. Currency must be ZAR
-      6. Email consistency (init vs webhook)
-      7. Amount match against DB record
-      8. Expiry check — reject if payment was already expired
-      9. Atomic UPDATE WHERE status = 'pending'  (race-condition safe)
-    """
     raw_body = request.get_data()
     sig      = request.headers.get("X-Paystack-Signature", "")
 
-    # 1. HMAC
+    # 1. HMAC signature
     if PAYSTACK_SECRET:
         expected = hmac.new(PAYSTACK_SECRET.encode(), raw_body, hashlib.sha512).hexdigest()
         if not hmac.compare_digest(expected, sig):
@@ -1182,13 +1542,14 @@ def paystack_webhook():
     # 2. Reversal/refund routing
     REVERSAL_EVENTS = {"charge.dispute.create", "transfer.reversed", "refund.processed"}
     if event in REVERSAL_EVENTS:
-        _rev_ref = (payload.get("data") or {}).get("reference") or \
-                   (payload.get("data") or {}).get("transaction_reference", "")
+        _rev_ref = ((payload.get("data") or {}).get("reference") or
+                    (payload.get("data") or {}).get("transaction_reference", ""))
         if _rev_ref:
             try:
                 _rc = get_db(); _rcur = _rc.cursor()
                 _rcur.execute(
-                    "UPDATE payments SET status = 'reversed' WHERE payment_ref = %s AND status = 'paid'",
+                    "UPDATE payments SET status = 'reversed' "
+                    "WHERE payment_ref = %s AND status = 'paid'",
                     (_rev_ref,)
                 )
                 _rc.commit()
@@ -1205,9 +1566,15 @@ def paystack_webhook():
     if event != "charge.success":
         return jsonify({"status": "ignored"}), 200
 
-    ref = payload["data"]["reference"]
+    ref      = payload["data"]["reference"]
+    event_id = payload.get("id") or f"paystack:{ref}"
 
-    # 3. Server-side verify with retry + backoff
+    # 3. Replay prevention
+    if _check_replay(event_id, "paystack"):
+        log_info("paystack", "replay_blocked", event_id=event_id)
+        return jsonify({"status": "already_processed"}), 200
+
+    # 4. Server-side verify with retry + backoff — NO fallback on failure
     verify_data = None
     for _attempt in range(3):
         try:
@@ -1224,18 +1591,12 @@ def paystack_webhook():
             if _attempt < 2:
                 _time.sleep(2 ** _attempt)
 
-    if not verify_data:
-        log_error("paystack", "verify_unavailable", ref=ref)
-        return jsonify({"error": "Verification unavailable — will retry"}), 200
+    if not verify_data or verify_data.get("data", {}).get("status") != "success":
+        log_error("paystack", "verify_failed_hard_stop", ref=ref)
+        # Hard stop — do not process unverified payment
+        return jsonify({"error": "Payment verification failed — not processing"}), 400
 
-    _txn = verify_data.get("data", {})
-
-    # 4. gateway_response check
-    if _txn.get("status") != "success":
-        log_warn("paystack", "verify_not_success",
-                 ref=ref, status=_txn.get("status"))
-        return jsonify({"error": "Payment verification failed"}), 400
-
+    _txn        = verify_data["data"]
     gw_response = (_txn.get("gateway_response") or "").lower()
     if gw_response not in ("approved", "successful", ""):
         log_warn("paystack", "gateway_response_not_approved",
@@ -1255,28 +1616,24 @@ def paystack_webhook():
             log_warn("paystack", "payment_not_found", ref=ref)
             return jsonify({"error": "payment not found"}), 404
 
-        # 5. Currency check
         if currency and currency != "ZAR":
             log_warn("paystack", "currency_mismatch", ref=ref, currency=currency)
             return jsonify({"error": "Currency mismatch"}), 400
 
-        # 6. Email consistency
         init_email = ((payment.get("metadata") or {}).get("email") or "").strip().lower()
         if init_email and cust_email and init_email != cust_email.strip().lower():
             log_warn("paystack", "email_mismatch",
                      ref=ref, init=init_email, webhook=cust_email)
             return jsonify({"error": "Email mismatch"}), 400
 
-        # 7. Amount check
         if int(payment["amount"]) != amount_verified:
             log_warn("paystack", "amount_mismatch",
                      ref=ref, expected=payment["amount"], got=amount_verified)
             return jsonify({"error": "Amount mismatch"}), 400
 
-        # 8 + 9. Atomic — only transition from 'pending' (blocks expired/reversed/already-paid)
+        # Atomic transition: only from 'pending'
         cur.execute("""
-            UPDATE payments
-            SET status = 'paid', paid_at = NOW(), payment_ref = %s
+            UPDATE payments SET status = 'paid', paid_at = NOW(), payment_ref = %s
             WHERE id = %s AND status = 'pending'
             RETURNING *
         """, (ref, ref))
@@ -1313,15 +1670,6 @@ def paystack_webhook():
 
 @app.post("/api/payments/webhook/payfast")
 def payfast_webhook():
-    """
-    PayFast ITN — full verification:
-      1. Signature check (MD5 + passphrase)
-      2. merchant_id must match our config
-      3. Server-side ITN confirmation (POST back to PayFast)
-      4. Amount must match DB record (amount_gross × 100)
-      5. Email must match initiation email
-      6. Atomic UPDATE WHERE status = 'pending'
-    """
     import urllib.parse
 
     data       = request.form.to_dict()
@@ -1348,7 +1696,13 @@ def payfast_webhook():
                  received=data.get("merchant_id"), payment_id=payment_id)
         return "INVALID", 400
 
-    # 3. Server-side ITN confirmation (POST back to PayFast to validate)
+    # 3. Replay prevention
+    event_id = f"payfast:{data.get('pf_payment_id', payment_id)}"
+    if _check_replay(event_id, "payfast"):
+        log_info("payfast", "replay_blocked", event_id=event_id)
+        return "ok", 200
+
+    # 4. Server-side ITN confirmation — HARD STOP on failure (no fallback)
     try:
         _pf_host = ("sandbox.payfast.co.za"
                     if os.environ.get("PAYFAST_SANDBOX") == "true"
@@ -1364,10 +1718,10 @@ def payfast_webhook():
                      payment_id=payment_id, response=confirm_resp.text[:200])
             return "INVALID", 400
     except Exception as _pfe:
-        log_error("payfast", "itn_confirm_error",
+        # Hard stop — do not process if we can't confirm with PayFast
+        log_error("payfast", "itn_confirm_unreachable",
                   payment_id=payment_id, error=str(_pfe))
-        # Don't reject — PayFast may be temporarily unreachable. Log and proceed cautiously.
-        log_warn("payfast", "itn_confirm_skipped_unreachable", payment_id=payment_id)
+        return "RETRY", 503
 
     conn = get_db()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
@@ -1377,7 +1731,7 @@ def payfast_webhook():
         if not payment:
             return "ok", 200
 
-        # 4. Amount check (PayFast sends amount_gross as a decimal string, e.g. "1.99")
+        # 5. Amount check
         try:
             itn_amount_cents = round(float(data.get("amount_gross", 0)) * 100)
         except (ValueError, TypeError):
@@ -1389,7 +1743,7 @@ def payfast_webhook():
                      expected=payment["amount"], got=itn_amount_cents)
             return "INVALID", 400
 
-        # 5. Email check
+        # 6. Email check
         itn_email  = (data.get("email_address") or "").strip().lower()
         init_email = ((payment.get("metadata") or {}).get("email") or "").strip().lower()
         if itn_email and init_email and itn_email != init_email:
@@ -1397,10 +1751,9 @@ def payfast_webhook():
                      payment_id=payment_id, init=init_email, itn=itn_email)
             return "INVALID", 400
 
-        # 6. Atomic transition from 'pending' only
+        # 7. Atomic transition from 'pending' only
         cur.execute("""
-            UPDATE payments
-            SET status = 'paid', paid_at = NOW(), payment_ref = %s
+            UPDATE payments SET status = 'paid', paid_at = NOW(), payment_ref = %s
             WHERE id = %s AND status = 'pending'
             RETURNING *
         """, (data.get("pf_payment_id"), payment_id))
@@ -1438,13 +1791,20 @@ def payfast_webhook():
 
 @app.get("/api/payments/<payment_id>")
 def get_payment_status(payment_id):
-    """Frontend polls this to track payment → certification progress."""
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
+    if not _valid_uuid(payment_id):
+        return jsonify({"error": "invalid payment_id"}), 400
+
+    token_sub = claims.get("sub", "")
     conn = get_db()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
     try:
         cur.execute("""
-            SELECT p.id, p.status, p.plan, p.paid_at, p.submission_id,
-                   p.gateway, p.payment_ref,
+            SELECT p.id, p.creator_id, p.status, p.plan, p.paid_at,
+                   p.submission_id, p.gateway, p.payment_ref,
                    s.cert_id, s.status as cert_status
             FROM payments p
             LEFT JOIN submissions s ON s.id = p.submission_id
@@ -1453,9 +1813,23 @@ def get_payment_status(payment_id):
         row = cur.fetchone()
         if not row:
             return jsonify({"error": "not found"}), 404
+
+        # Ownership: creator_id in payments must match token sub
+        try:
+            token_uuid = str(uuid.UUID(token_sub))
+        except Exception:
+            token_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, token_sub))
+
+        if row["creator_id"] != token_uuid and row["creator_id"] != token_sub:
+            log_warn("payment_status", "ownership_denied",
+                     token_sub=token_sub, payment_id=payment_id)
+            return jsonify({"error": "not found"}), 404
+
         result = dict(row)
         result["id"]            = str(result["id"])
-        result["submission_id"] = str(result["submission_id"]) if result["submission_id"] else None
+        result["submission_id"] = (str(result["submission_id"])
+                                   if result["submission_id"] else None)
+        result.pop("creator_id", None)  # don't expose internally
         if result["paid_at"]:
             result["paid_at"] = result["paid_at"].isoformat()
         return jsonify(result)
@@ -1465,27 +1839,18 @@ def get_payment_status(payment_id):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Admin / cron endpoints
-# All require: X-Admin-Key: <ADMIN_SECRET>
-# Cron schedule:
-#   /api/admin/expire-payments          every 15 min
-#   /api/admin/retry-certifications     every 5 min
+# Admin / cron endpoints (X-Admin-Key required)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/api/admin/expire-payments")
 def expire_stale_payments():
-    auth_err = _require_admin(request)
-    if auth_err:
-        return auth_err
-
-    conn = get_db()
-    cur  = conn.cursor()
+    if _require_admin(request):
+        return _require_admin(request)
+    conn = get_db(); cur = conn.cursor()
     try:
         cur.execute("""
-            UPDATE payments
-            SET    status = 'expired'
-            WHERE  status = 'pending'
-              AND  created_at < NOW() - INTERVAL '30 minutes'
+            UPDATE payments SET status = 'expired'
+            WHERE status = 'pending' AND created_at < NOW() - INTERVAL '30 minutes'
         """)
         expired = cur.rowcount
         conn.commit()
@@ -1495,32 +1860,25 @@ def expire_stale_payments():
         conn.rollback()
         return jsonify({"error": str(e)}), 500
     finally:
-        cur.close()
-        conn.close()
+        cur.close(); conn.close()
 
 
 @app.post("/api/admin/retry-certifications")
 def retry_pending_certifications():
-    auth_err = _require_admin(request)
-    if auth_err:
-        return auth_err
-
-    conn = get_db()
-    cur  = conn.cursor(cursor_factory=RealDictCursor)
+    if _require_admin(request):
+        return _require_admin(request)
+    conn = get_db(); cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         cur.execute("""
             SELECT * FROM payments
-            WHERE  status        = 'paid'
-              AND  submission_id IS NULL
-              AND  (metadata->>'cert_retry')::boolean = true
-              AND  created_at > NOW() - INTERVAL '24 hours'
-            ORDER BY created_at
-            LIMIT 20
+            WHERE status = 'paid' AND submission_id IS NULL
+              AND (metadata->>'cert_retry')::boolean = true
+              AND created_at > NOW() - INTERVAL '24 hours'
+            ORDER BY created_at LIMIT 20
         """)
         rows = cur.fetchall()
     finally:
-        cur.close()
-        conn.close()
+        cur.close(); conn.close()
 
     retried = 0
     for row in rows:
