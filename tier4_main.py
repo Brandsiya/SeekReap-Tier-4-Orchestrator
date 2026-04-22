@@ -231,8 +231,50 @@ def _require_admin(req):
 # DB helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ── Connection pool (min=2 max=10, thread-safe) ───────────────────────────────
+from psycopg2 import pool as _pg_pool
+
+_db_pool: "_pg_pool.ThreadedConnectionPool | None" = None
+
+def _get_pool() -> "_pg_pool.ThreadedConnectionPool":
+    global _db_pool
+    if _db_pool is None or _db_pool.closed:
+        _db_pool = _pg_pool.ThreadedConnectionPool(
+            minconn=2, maxconn=10,
+            dsn=os.environ["DATABASE_URL"],
+            connect_timeout=5,
+        )
+    return _db_pool
+
 def get_db():
-    return psycopg2.connect(os.environ["DATABASE_URL"])
+    """Get a connection from the pool. Caller MUST call put_db(conn) when done."""
+    return _get_pool().getconn()
+
+def put_db(conn):
+    """Return connection to the pool. Pass conn=None to no-op safely."""
+    if conn is not None:
+        try:
+            _get_pool().putconn(conn)
+        except Exception:
+            pass  # pool may be closed during shutdown
+
+from contextlib import contextmanager
+
+@contextmanager
+def db_conn():
+    """
+    Usage:
+        with db_conn() as conn:
+            cur = conn.cursor(...)
+            ...
+    Connection is returned to pool on exit, even if an exception is raised.
+    """
+    conn = get_db()
+    try:
+        yield conn
+    finally:
+        put_db(conn)
+
 
 
 def normalize_youtube_url(url):
@@ -363,7 +405,7 @@ def insert_submission(data, creator_uuid):
         raise
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
     return submission_id, title, channel, thumbnail_url
 
 
@@ -384,7 +426,7 @@ def check_rate_limit(creator_uuid: str) -> tuple:
         return True, ""
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -605,7 +647,7 @@ def certify_work():
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 @app.get("/api/certify/<submission_id>")
@@ -664,7 +706,7 @@ def certify_status(submission_id):
         return jsonify(data), 200
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 @app.get("/api/status/<submission_id>")
@@ -698,7 +740,7 @@ def status(submission_id):
         matches = cur.fetchall()
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
     if not row:
         return jsonify({"error": "not found"}), 404
@@ -797,7 +839,7 @@ def list_submissions():
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 @app.get("/api/metrics/latency")
@@ -846,7 +888,7 @@ def latency_metrics():
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 @app.post("/api/finalize")
@@ -879,7 +921,7 @@ def finalize():
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
     return (jsonify({"status": "updated"}) if updated
             else (jsonify({"error": "not found"}), 404))
 
@@ -910,7 +952,7 @@ def recover_stuck_jobs():
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 @app.get("/api/verify-proof/<submission_id>")
@@ -939,7 +981,7 @@ def verify_blockchain_proof(submission_id):
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 @app.get("/debug/env")
@@ -1046,7 +1088,7 @@ def create_collaborator_invites():
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 @app.get("/api/invite")
@@ -1080,7 +1122,7 @@ def get_invite():
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 @app.post("/api/invite/accept")
@@ -1148,7 +1190,7 @@ def accept_invite():
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1177,6 +1219,31 @@ def _is_disposable_email(email: str) -> bool:
         return email.strip().lower().split("@")[-1] in _DISPOSABLE_DOMAINS
     except Exception:
         return False
+
+
+# ── External HTTP retry helper ────────────────────────────────────────────────
+def _retry_request(method: str, url: str, max_attempts: int = 3,
+                   backoff_base: float = 1.0, **kwargs):
+    """
+    Wraps requests.get/post with exponential backoff.
+    Returns (response, None) on success, (None, last_exception) on exhaustion.
+    Retries on: ConnectionError, Timeout, 5xx responses.
+    Does NOT retry on 4xx (client errors).
+    """
+    last_exc = None
+    for attempt in range(max_attempts):
+        try:
+            resp = getattr(requests, method.lower())(url, **kwargs)
+            if resp.status_code < 500:
+                return resp, None
+            # 5xx — treat as transient
+            last_exc = Exception(f"HTTP {resp.status_code}")
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout) as e:
+            last_exc = e
+        if attempt < max_attempts - 1:
+            _time.sleep(backoff_base * (2 ** attempt))
+    return None, last_exc
 
 
 def ensure_payments_tables():
@@ -1213,6 +1280,9 @@ def ensure_payments_tables():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pe_payment_id ON payment_events(payment_id)")
+        # Retry tracking columns (idempotent)
+        cur.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS cert_retry_count INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS last_retry_at TIMESTAMP")
 
         # Replay prevention: store processed webhook event IDs
         cur.execute("""
@@ -1225,7 +1295,7 @@ def ensure_payments_tables():
         conn.commit()
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 try:
@@ -1242,7 +1312,7 @@ def _log_payment_event(payment_id, event_type, gateway, payload):
             INSERT INTO payment_events (payment_id, event_type, gateway, payload)
             VALUES (%s, %s, %s, %s)
         """, (payment_id, event_type, gateway, Json(payload)))
-        _c.commit(); _cur.close(); _c.close()
+        _c.commit(); _cur.close(); put_db(_c)
     except Exception as _e:
         log_warn("payment", "event_log_failed",
                  payment_id=payment_id, event=event_type, error=str(_e))
@@ -1261,7 +1331,7 @@ def _check_replay(event_id: str, gateway: str) -> bool:
             ON CONFLICT (id) DO NOTHING
         """, (event_id, gateway))
         inserted = _cur.rowcount
-        _c.commit(); _cur.close(); _c.close()
+        _c.commit(); _cur.close(); put_db(_c)
         return inserted == 0  # 0 rows inserted → already existed → replay
     except Exception as _e:
         log_warn("payment", "replay_check_error", error=str(_e))
@@ -1293,12 +1363,16 @@ def init_paystack(payment_id, data):
         },
     }
     try:
-        r    = requests.post(
+        r, _err = _retry_request(
+            "post",
             "https://api.paystack.co/transaction/initialize",
+            max_attempts=3,
             headers={"Authorization": f"Bearer {PAYSTACK_SECRET}",
                      "Content-Type": "application/json"},
             json=payload, timeout=15,
         )
+        if r is None:
+            raise Exception(str(_err))
         resp = r.json()
         if not resp.get("status"):
             return jsonify({"error": resp.get("message", "Paystack error")}), 502
@@ -1346,7 +1420,7 @@ def _set_cert_retry_flag(payment_id_str):
             "UPDATE payments SET metadata = COALESCE(metadata,'{}') || %s::jsonb WHERE id = %s",
             (_json.dumps({"cert_retry": True}), payment_id_str)
         )
-        _c.commit(); _cur.close(); _c.close()
+        _c.commit(); _cur.close(); put_db(_c)
     except Exception as _e:
         log_error("payment", "cert_retry_flag_failed",
                   payment_id=payment_id_str, error=str(_e))
@@ -1383,7 +1457,7 @@ def trigger_certification(payment_row, pending_meta):
                         (data.get("submission_id"), str(payment_row["id"])))
             conn.commit()
         finally:
-            cur.close(); conn.close()
+            cur.close(); put_db(conn)
         return data
     except Exception as e:
         log_error("payment", "trigger_cert_error", error=str(e))
@@ -1431,7 +1505,7 @@ def initiate_payment():
             ORDER BY created_at DESC LIMIT 1
         """, (creator_id, plan))
         existing_payment = _idemc.fetchone()
-        _idemc.close(); _idem.close()
+        _idemc.close(); put_db(_idem)
         if existing_payment:
             existing_id = str(existing_payment["id"])
             log_info("payment", "idempotent_reuse", payment_id=existing_id)
@@ -1454,7 +1528,7 @@ def initiate_payment():
               AND created_at > NOW() - INTERVAL '1 hour'
         """, (creator_id,))
         if _rlc.fetchone()[0] >= 5:
-            _rlc.close(); _rl.close()
+            _rlc.close(); put_db(_rl)
             return jsonify({"error": "Too many pending payments. Complete or wait before retrying."}), 429
         _rlc.close(); _rl.close()
     except Exception as _e:
@@ -1472,10 +1546,10 @@ def initiate_payment():
                   AND created_at > NOW() - INTERVAL '1 hour'
             """, (client_ip,))
             if _rlc2.fetchone()[0] >= 10:
-                _rlc2.close(); _rl2.close()
+                _rlc2.close(); put_db(_rl2)
                 log_warn("fraud", "ip_rate_limit", ip=client_ip)
                 return jsonify({"error": "Too many requests. Please try again later."}), 429
-            _rlc2.close(); _rl2.close()
+            _rlc2.close(); put_db(_rl2)
         except Exception as _e2:
             log_warn("payment", "ip_rate_check_failed", error=str(_e2))
 
@@ -1509,7 +1583,7 @@ def initiate_payment():
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
     _log_payment_event(payment_id, "initiate", gateway,
                        {"ip": client_ip, "plan": plan, "creator_id": creator_id})
@@ -1616,6 +1690,11 @@ def paystack_webhook():
             log_warn("paystack", "payment_not_found", ref=ref)
             return jsonify({"error": "payment not found"}), 404
 
+        # Belt-and-suspenders expiry check (cron may not have run yet)
+        if payment["status"] == "expired":
+            log_warn("paystack", "payment_already_expired", ref=ref)
+            return jsonify({"error": "Payment expired"}), 400
+
         if currency and currency != "ZAR":
             log_warn("paystack", "currency_mismatch", ref=ref, currency=currency)
             return jsonify({"error": "Currency mismatch"}), 400
@@ -1645,7 +1724,7 @@ def paystack_webhook():
         return jsonify({"error": str(e)}), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
     if not paid_row:
         log_info("paystack", "idempotent_skip", ref=ref,
@@ -1703,25 +1782,25 @@ def payfast_webhook():
         return "ok", 200
 
     # 4. Server-side ITN confirmation — HARD STOP on failure (no fallback)
-    try:
-        _pf_host = ("sandbox.payfast.co.za"
-                    if os.environ.get("PAYFAST_SANDBOX") == "true"
-                    else "www.payfast.co.za")
-        confirm_resp = requests.post(
-            f"https://{_pf_host}/eng/query/validate",
-            data=data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=15,
-        )
-        if confirm_resp.text.strip() != "VALID":
-            log_warn("payfast", "itn_confirmation_failed",
-                     payment_id=payment_id, response=confirm_resp.text[:200])
-            return "INVALID", 400
-    except Exception as _pfe:
-        # Hard stop — do not process if we can't confirm with PayFast
+    _pf_host = ("sandbox.payfast.co.za"
+                if os.environ.get("PAYFAST_SANDBOX") == "true"
+                else "www.payfast.co.za")
+    confirm_resp, _pfe = _retry_request(
+        "post",
+        f"https://{_pf_host}/eng/query/validate",
+        max_attempts=3,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=15,
+    )
+    if confirm_resp is None:
         log_error("payfast", "itn_confirm_unreachable",
                   payment_id=payment_id, error=str(_pfe))
         return "RETRY", 503
+    if confirm_resp.text.strip() != "VALID":
+        log_warn("payfast", "itn_confirmation_failed",
+                 payment_id=payment_id, response=confirm_resp.text[:200])
+        return "INVALID", 400
 
     conn = get_db()
     cur  = conn.cursor(cursor_factory=RealDictCursor)
@@ -1730,6 +1809,11 @@ def payfast_webhook():
         payment = cur.fetchone()
         if not payment:
             return "ok", 200
+
+        # Belt-and-suspenders expiry check
+        if payment["status"] == "expired":
+            log_warn("payfast", "payment_already_expired", payment_id=payment_id)
+            return "INVALID", 400
 
         # 5. Amount check
         try:
@@ -1766,7 +1850,7 @@ def payfast_webhook():
         return str(e), 500
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
     if not paid_row:
         log_info("payfast", "idempotent_skip", payment_id=payment_id,
@@ -1835,7 +1919,7 @@ def get_payment_status(payment_id):
         return jsonify(result)
     finally:
         cur.close()
-        conn.close()
+        put_db(conn)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1873,12 +1957,14 @@ def retry_pending_certifications():
             SELECT * FROM payments
             WHERE status = 'paid' AND submission_id IS NULL
               AND (metadata->>'cert_retry')::boolean = true
+              AND COALESCE(cert_retry_count, 0) < 3
+              AND (last_retry_at IS NULL OR last_retry_at < NOW() - INTERVAL '5 minutes')
               AND created_at > NOW() - INTERVAL '24 hours'
             ORDER BY created_at LIMIT 20
         """)
         rows = cur.fetchall()
     finally:
-        cur.close(); conn.close()
+        cur.close(); put_db(conn)
 
     retried = 0
     for row in rows:
@@ -1889,11 +1975,24 @@ def retry_pending_certifications():
             if result:
                 retried += 1
                 _c = get_db(); _cur = _c.cursor()
-                _cur.execute(
-                    "UPDATE payments SET metadata = metadata - 'cert_retry' WHERE id = %s",
-                    (str(row["id"]),)
-                )
-                _c.commit(); _cur.close(); _c.close()
+                _cur.execute("""
+                    UPDATE payments
+                    SET metadata = metadata - 'cert_retry',
+                        cert_retry_count = COALESCE(cert_retry_count, 0) + 1,
+                        last_retry_at = NOW()
+                    WHERE id = %s
+                """, (str(row["id"]),))
+                _c.commit(); _cur.close(); put_db(_c)
+            else:
+                # Increment retry count even on failure so we don't spin forever
+                _c = get_db(); _cur = _c.cursor()
+                _cur.execute("""
+                    UPDATE payments
+                    SET cert_retry_count = COALESCE(cert_retry_count, 0) + 1,
+                        last_retry_at = NOW()
+                    WHERE id = %s
+                """, (str(row["id"]),))
+                _c.commit(); _cur.close(); put_db(_c)
         except Exception as e:
             log_error("admin", "retry_cert_failed",
                       payment_id=str(row["id"]), error=str(e))
