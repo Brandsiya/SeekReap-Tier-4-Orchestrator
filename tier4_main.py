@@ -141,7 +141,9 @@ def _fetch_jwks(force: bool = False) -> list:
         if not force and _jwks_cache and (now - _jwks_fetched_at) < _JWKS_TTL_SECONDS:
             return _jwks_cache
         try:
-            resp = requests.get(_jwks_url(), timeout=5)
+            url = _jwks_url()
+            log_info("auth", "fetching_jwks", url=url)
+            resp = requests.get(url, timeout=5)
             if resp.status_code == 200:
                 keys = resp.json().get("keys", [])
                 _jwks_cache      = keys
@@ -149,10 +151,11 @@ def _fetch_jwks(force: bool = False) -> list:
                 log_info("auth", "jwks_refreshed", key_count=len(keys))
                 return keys
             else:
-                log_warn("auth", "jwks_fetch_non200", status=resp.status_code)
+                log_warn("auth", "jwks_fetch_non200", status=resp.status_code, body=resp.text[:200])
         except Exception as e:
             log_warn("auth", "jwks_fetch_error", error=str(e))
-        return _jwks_cache   # return stale cache on error rather than []
+        # On first fetch failure, return empty list (will retry on next request)
+        return _jwks_cache
 
 
 def _verify_supabase_jwt(token: str) -> dict | None:
@@ -2013,3 +2016,36 @@ def debug_auth_probe():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
+
+@app.get("/debug/auth-probe")
+def debug_auth_probe():
+    """Temporary diagnostic endpoint — remove after confirming auth works."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"step": "no_bearer_header"}), 400
+    token = auth_header[7:].strip()
+    try:
+        from jose import jwt as _j
+        header = _j.get_unverified_header(token)
+    except Exception as e:
+        return jsonify({"step": "bad_header", "error": str(e)}), 400
+
+    claims = _verify_supabase_jwt(token)
+    if not claims:
+        return jsonify({
+            "step":   "verify_failed",
+            "alg":    header.get("alg"),
+            "kid":    header.get("kid"),
+            "jwks_url": _jwks_url(),
+            "jwks_cached_key_count": len(_jwks_cache),
+        }), 401
+
+    return jsonify({
+        "step":        "ok",
+        "alg":         header.get("alg"),
+        "claim_keys":  list(claims.keys()),
+        "sub_prefix":  claims.get("sub", "")[:8] + "…",
+        "aud":         claims.get("aud"),
+        "exp_valid":   True,
+    }), 200
