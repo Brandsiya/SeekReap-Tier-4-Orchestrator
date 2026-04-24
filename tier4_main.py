@@ -1456,6 +1456,16 @@ def trigger_certification(payment_row, pending_meta):
 
 @app.post("/api/payments/initiate")
 def initiate_payment():
+    try:
+        return _initiate_payment_inner()
+    except Exception as e:
+        import traceback
+        log_error("payment", "initiate_unhandled",
+                  error=str(e), trace=traceback.format_exc())
+        return jsonify({"error": "Internal server error", "detail": str(e)}), 500
+
+
+def _initiate_payment_inner():
     claims, err = _require_auth(request)
     if err:
         return err
@@ -1962,6 +1972,44 @@ def _shutdown_pool():
             log_warn("db", "pool_close_error", error=str(_e))
 
 _atexit.register(_shutdown_pool)
+
+
+
+@app.get("/debug/auth-probe")
+def debug_auth_probe():
+    """
+    Temporary diagnostic endpoint — remove after confirming auth works.
+    Returns claim keys (not values) so nothing sensitive is exposed.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"step": "no_bearer_header"}), 400
+    token = auth_header[7:].strip()
+    try:
+        from jose import jwt as _j
+        header = _j.get_unverified_header(token)
+    except Exception as e:
+        return jsonify({"step": "bad_header", "error": str(e)}), 400
+
+    claims = _verify_supabase_jwt(token)
+    if not claims:
+        return jsonify({
+            "step":   "verify_failed",
+            "alg":    header.get("alg"),
+            "kid":    header.get("kid"),
+            "jwks_url": _jwks_url(),
+            "jwks_cached_key_count": len(_jwks_cache),
+        }), 401
+
+    return jsonify({
+        "step":        "ok",
+        "alg":         header.get("alg"),
+        "claim_keys":  list(claims.keys()),
+        "sub_prefix":  claims.get("sub", "")[:8] + "…",
+        "aud":         claims.get("aud"),
+        "exp_valid":   True,
+    }), 200
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
