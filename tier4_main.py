@@ -116,10 +116,7 @@ SUPABASE_URL        = os.environ.get("SUPABASE_URL", "")          # e.g. https:/
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET", "")   # kept for HS256 fallback only
 
 # ── JWKS cache ────────────────────────────────────────────────────────────────
-# Keys are cached in-process and refreshed every 6 hours, or on cache miss
-# (kid not found). This avoids a network call on every request while still
-# handling key rotation gracefully.
-_jwks_cache:      list   = []          # list of JWK dicts
+_jwks_cache:      list   = []
 _jwks_fetched_at: float  = 0.0
 _jwks_lock               = threading.Lock()
 _JWKS_TTL_SECONDS        = 6 * 3600   # 6 hours
@@ -131,10 +128,6 @@ def _jwks_url() -> str:
 
 
 def _fetch_jwks(force: bool = False) -> list:
-    """
-    Returns the cached JWKS key list, refreshing when stale or forced.
-    Thread-safe. Returns [] on error so callers can fall back gracefully.
-    """
     global _jwks_cache, _jwks_fetched_at
     now = _time.time()
     with _jwks_lock:
@@ -154,26 +147,13 @@ def _fetch_jwks(force: bool = False) -> list:
                 log_warn("auth", "jwks_fetch_non200", status=resp.status_code, body=resp.text[:200])
         except Exception as e:
             log_warn("auth", "jwks_fetch_error", error=str(e))
-        # On first fetch failure, return empty list (will retry on next request)
         return _jwks_cache
 
 
 def _verify_supabase_jwt(token: str) -> dict | None:
-    """
-    Verifies a Supabase JWT.
-
-    Strategy (in order):
-      1. Inspect header to determine algorithm.
-      2. ES256  → verify via JWKS (kid lookup, auto-refresh on miss).
-      3. HS256  → verify via SUPABASE_JWT_SECRET (legacy / local dev).
-      4. Secret missing & algo unknown → decode without verify (dev only, warns loudly).
-
-    Returns the claims dict on success, None on any failure.
-    """
     if not token:
         return None
 
-    # ── Step 1: read header (no verification yet) ────────────────────────────
     try:
         header = _jose_jwt.get_unverified_header(token)
     except Exception as e:
@@ -183,16 +163,16 @@ def _verify_supabase_jwt(token: str) -> dict | None:
     alg = header.get("alg", "")
     kid = header.get("kid", "")
 
-    # ── Step 2: ES256 path (Supabase default) ────────────────────────────────
+    # ES256 path (Supabase default)
     if alg == "ES256":
-        for force_refresh in (False, True):        # retry once with fresh keys
+        for force_refresh in (False, True):
             keys = _fetch_jwks(force=force_refresh)
             matched = [k for k in keys if k.get("kid") == kid] if kid else keys
             if not matched:
                 if force_refresh:
                     log_warn("auth", "jwks_kid_not_found", kid=kid)
                     return None
-                continue   # trigger forced refresh
+                continue
             try:
                 claims = _jose_jwt.decode(
                     token,
@@ -209,7 +189,7 @@ def _verify_supabase_jwt(token: str) -> dict | None:
                 return None
         return None
 
-    # ── Step 3: HS256 path (legacy / local dev with JWT secret) ─────────────
+    # HS256 path (legacy / local dev)
     if alg == "HS256":
         if not SUPABASE_JWT_SECRET:
             log_warn("auth", "hs256_token_but_no_secret")
@@ -229,14 +209,52 @@ def _verify_supabase_jwt(token: str) -> dict | None:
             log_warn("auth", "jwt_hs256_invalid", error=str(e))
             return None
 
-    # ── Step 4: Unknown algorithm — hard reject ──────────────────────────────
     log_warn("auth", "jwt_unknown_alg", alg=alg)
     return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Auth helpers
+# FIX: _require_auth now validates sub is present and logs verified identity
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _require_auth(req) -> tuple:
+    auth_header = req.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None, (jsonify({"error": "Authorization header required"}), 401)
+    token = auth_header[7:].strip()
+    if not token:
+        return None, (jsonify({"error": "Bearer token is empty"}), 401)
+    claims = _verify_supabase_jwt(token)
+    if not claims:
+        return None, (jsonify({"error": "Invalid or expired token"}), 401)
+    sub = claims.get("sub", "")
+    if not sub:
+        log_warn("auth", "token_missing_sub", claims_keys=list(claims.keys()))
+        return None, (jsonify({"error": "Token missing sub claim"}), 401)
+    log_info("auth", "verified", sub=sub[:8] + "…")
+    return claims, None
+
+
+def _require_internal(req) -> tuple:
+    if INTERNAL_SECRET and req.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
+        return {"sub": "internal", "role": "service"}, None
+    claims, err = _require_auth(req)
+    if err:
+        return None, (jsonify({"error": "Internal endpoint — not publicly accessible"}), 403)
+    return claims, None
+
+
+def _require_admin(req):
+    ADMIN_SECRET = os.environ.get("ADMIN_SECRET", "")
+    if not ADMIN_SECRET or req.headers.get("X-Admin-Key") != ADMIN_SECRET:
+        log_warn("admin", "unauthorized", path=req.path, ip=req.remote_addr)
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # DB: connection pool + context managers
-# FIX: ALL db access goes through db_conn() or db_cursor() — no raw conn.close()
 # ══════════════════════════════════════════════════════════════════════════════
 
 from psycopg2 import pool as _pg_pool
@@ -267,10 +285,6 @@ def put_db(conn):
 
 @contextmanager
 def db_conn():
-    """
-    Acquires a pooled connection and guarantees return to pool on exit.
-    Never call put_db() manually when using this context manager.
-    """
     conn = get_db()
     try:
         yield conn
@@ -280,15 +294,6 @@ def db_conn():
 
 @contextmanager
 def db_cursor(cursor_factory=None):
-    """
-    Acquires connection + cursor, closes cursor and returns connection to
-    pool on exit — even if an exception is raised.
-
-    Usage:
-        with db_cursor(RealDictCursor) as (conn, cur):
-            cur.execute(...)
-            conn.commit()
-    """
     with db_conn() as conn:
         kw = {"cursor_factory": cursor_factory} if cursor_factory else {}
         cur = conn.cursor(**kw)
@@ -348,7 +353,6 @@ def extract_youtube_metadata(url):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def get_or_create_creator(conn, firebase_uid, email=None, name=None):
-    # Uses passed-in conn — caller owns the connection lifecycle
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         try:
             uuid.UUID(firebase_uid)
@@ -451,20 +455,17 @@ def check_rate_limit(creator_uuid: str) -> tuple:
 @app.get("/health")
 def health():
     problems = {}
-    # DB liveness
     try:
         with db_cursor() as (conn, cur):
             cur.execute("SELECT 1")
     except Exception as e:
         problems["db"] = str(e)
-    # Connection pool state
     try:
         _p = _get_pool()
         if _p.closed:
             problems["pool"] = "closed"
     except Exception as _pe:
         problems["pool"] = str(_pe)
-    # Open circuit breakers
     open_gw = [gw for gw, s in _circuit_state.items()
                if s.get("open_until", 0) > _time.time()]
     if open_gw:
@@ -944,6 +945,41 @@ def debug_env():
     })
 
 
+@app.get("/debug/auth-probe")
+def debug_auth_probe():
+    """
+    Temporary diagnostic endpoint — remove after confirming auth works.
+    Returns claim keys (not values) so nothing sensitive is exposed.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"step": "no_bearer_header"}), 400
+    token = auth_header[7:].strip()
+    try:
+        header = _jose_jwt.get_unverified_header(token)
+    except Exception as e:
+        return jsonify({"step": "bad_header", "error": str(e)}), 400
+
+    claims = _verify_supabase_jwt(token)
+    if not claims:
+        return jsonify({
+            "step":                  "verify_failed",
+            "alg":                   header.get("alg"),
+            "kid":                   header.get("kid"),
+            "jwks_url":              _jwks_url(),
+            "jwks_cached_key_count": len(_jwks_cache),
+        }), 401
+
+    return jsonify({
+        "step":       "ok",
+        "alg":        header.get("alg"),
+        "claim_keys": list(claims.keys()),
+        "sub_prefix": claims.get("sub", "")[:8] + "…",
+        "aud":        claims.get("aud"),
+        "exp_valid":  True,
+    }), 200
+
+
 @app.get("/api/qrcode/<string:cert_id>")
 def generate_qrcode(cert_id):
     import qrcode
@@ -1137,7 +1173,6 @@ PAYFAST_PASSPHRASE   = os.environ.get("PAYFAST_PASSPHRASE", "")
 FRONTEND_URL         = os.environ.get("FRONTEND_URL", "https://seekreap-frontend.onrender.com")
 TIER4_INTERNAL       = os.environ.get("TIER4_INTERNAL", "https://seekreap-tier-4-dev.fly.dev")
 
-# Server-authoritative plan pricing — client-supplied amount is always ignored
 PLAN_AMOUNTS = {"payg": 199, "creator": 999, "studio": 2999}
 
 _DISPOSABLE_DOMAINS = {
@@ -1156,8 +1191,6 @@ def _is_disposable_email(email: str) -> bool:
 
 
 # ── Circuit breaker ───────────────────────────────────────────────────────────
-# In-process per-gateway circuit breaker.
-# Opens after 3 consecutive failures; auto-resets after 60 s.
 _circuit_state: dict = {}
 _CIRCUIT_FAIL_THRESHOLD = 3
 _CIRCUIT_OPEN_SECONDS   = 60
@@ -1179,14 +1212,6 @@ def _circuit_record_failure(gateway: str):
 
 def _retry_request(method: str, url: str, gateway: str = "",
                    max_attempts: int = 3, timeout: int = 5, **kwargs):
-    """
-    HTTP request with circuit breaker + exponential backoff.
-    - Checks circuit before each attempt
-    - Does NOT retry 4xx responses (client errors)
-    - Retries on ConnectionError, Timeout, and 5xx
-    - Max wall time ≈ timeout * max_attempts + sum(2^i for i in backoffs)
-    Returns (response, None) on success, (None, last_exception) on exhaustion.
-    """
     if gateway and not _circuit_ok(gateway):
         log_warn("circuit", "request_blocked", gateway=gateway, url=url)
         return None, Exception(f"circuit open for {gateway}")
@@ -1196,12 +1221,10 @@ def _retry_request(method: str, url: str, gateway: str = "",
     for attempt in range(max_attempts):
         try:
             resp = getattr(requests, method.lower())(url, **kwargs)
-            # FIX: only 2xx is success — 4xx passes through as failure
             if 200 <= resp.status_code < 300:
                 if gateway:
                     _circuit_record_success(gateway)
                 return resp, None
-            last_exc = Exception(f"HTTP {resp.status_code}: non-2xx")
             last_exc = Exception(f"HTTP {resp.status_code}")
         except (requests.exceptions.ConnectionError,
                 requests.exceptions.Timeout) as e:
@@ -1237,12 +1260,10 @@ def ensure_payments_tables():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_payments_payment_ref ON payments(payment_ref)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_payments_creator_id  ON payments(creator_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_payments_status      ON payments(status)")
-        # FIX: covering index for retry-certifications cron query
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_payments_retry
             ON payments (status, cert_retry_count, last_retry_at, created_at)
         """)
-
         cur.execute("""
             CREATE TABLE IF NOT EXISTS payment_events (
                 id         BIGSERIAL PRIMARY KEY,
@@ -1254,8 +1275,6 @@ def ensure_payments_tables():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_pe_payment_id ON payment_events(payment_id)")
-
-        # FIX: unique constraint on (id, gateway) for DB-level idempotency — no race window
         cur.execute("""
             CREATE TABLE IF NOT EXISTS webhook_events (
                 id           TEXT NOT NULL,
@@ -1268,12 +1287,8 @@ def ensure_payments_tables():
             CREATE UNIQUE INDEX IF NOT EXISTS uniq_webhook_event
             ON webhook_events (id, gateway)
         """)
-
-        # Idempotent column adds for existing deployments
         cur.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS cert_retry_count INTEGER DEFAULT 0")
         cur.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS last_retry_at TIMESTAMP")
-
-        # FIX: indices that make rate-limit queries O(log n) instead of full-table scans
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_submissions_creator_time
             ON submissions (creator_id, submitted_at DESC)
@@ -1283,7 +1298,6 @@ def ensure_payments_tables():
             ON payment_events ((payload->>'ip'), created_at)
             WHERE event_type = 'initiate'
         """)
-
         conn.commit()
 
 
@@ -1308,11 +1322,6 @@ def _log_payment_event(payment_id, event_type, gateway, payload):
 
 
 def _check_replay(event_id: str, gateway: str) -> bool:
-    """
-    FIX: Uses DB PRIMARY KEY (id, gateway) as the idempotency lock.
-    INSERT ... ON CONFLICT DO NOTHING is atomic — zero race window.
-    Returns True if already processed (replay).
-    """
     try:
         with db_cursor() as (conn, cur):
             cur.execute("""
@@ -1432,7 +1441,6 @@ def trigger_certification(payment_row, pending_meta):
         "payment_id":      str(payment_row["id"]),
     }
     try:
-        # FIX: use _retry_request so transient failures don't silently drop certs
         r, _cert_err = _retry_request(
             "post",
             TIER4_INTERNAL + "/api/certify",
@@ -1456,6 +1464,10 @@ def trigger_certification(payment_row, pending_meta):
         log_error("payment", "trigger_cert_error", error=str(e))
         return None
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FIX: initiate_payment wrapped for full traceback on any 500
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/api/payments/initiate")
 def initiate_payment():
@@ -1590,14 +1602,6 @@ def _initiate_payment_inner():
 
 @app.post("/api/payments/webhook/paystack")
 def paystack_webhook():
-    """
-    Security layers:
-    1. HMAC-SHA512 signature verification
-    2. DB-level replay prevention — PRIMARY KEY (id, gateway) atomic insert
-    3. Server-side transaction verify via Paystack API (HARD STOP on failure)
-    4. Amount, email, currency cross-checks
-    5. FIX: Atomic UPDATE WHERE status = 'pending' — enforces valid state machine
-    """
     raw_body = request.get_data()
     sig      = request.headers.get("X-Paystack-Signature", "")
 
@@ -1640,7 +1644,6 @@ def paystack_webhook():
         log_info("paystack", "replay_blocked", event_id=event_id)
         return jsonify({"status": "already_processed"}), 200
 
-    # Server-side verify — HARD STOP, no fallback
     verify_data = None
     for _attempt in range(3):
         try:
@@ -1699,7 +1702,6 @@ def paystack_webhook():
                          ref=ref, expected=payment["amount"], got=amount_verified)
                 return jsonify({"error": "Amount mismatch"}), 400
 
-            # FIX: transition guard — only from 'pending' (expired/paid/reversed blocked)
             cur.execute("""
                 UPDATE payments SET status = 'paid', paid_at = NOW(), payment_ref = %s
                 WHERE id = %s AND status = 'pending'
@@ -1807,7 +1809,6 @@ def payfast_webhook():
                          payment_id=payment_id, init=init_email, itn=itn_email)
                 return "INVALID", 400
 
-            # FIX: transition guard — only from 'pending'
             cur.execute("""
                 UPDATE payments SET status = 'paid', paid_at = NOW(), payment_ref = %s
                 WHERE id = %s AND status = 'pending'
@@ -1941,7 +1942,6 @@ def retry_pending_certifications():
                         WHERE id = %s
                     """, (str(row["id"]),))
                 else:
-                    # FIX: dead-letter — mark failed_permanent after max retries
                     cur.execute("""
                         UPDATE payments
                         SET cert_retry_count = COALESCE(cert_retry_count, 0) + 1,
@@ -1976,76 +1976,5 @@ def _shutdown_pool():
 
 _atexit.register(_shutdown_pool)
 
-
-
-@app.get("/debug/auth-probe")
-def debug_auth_probe():
-    """
-    Temporary diagnostic endpoint — remove after confirming auth works.
-    Returns claim keys (not values) so nothing sensitive is exposed.
-    """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return jsonify({"step": "no_bearer_header"}), 400
-    token = auth_header[7:].strip()
-    try:
-        from jose import jwt as _j
-        header = _j.get_unverified_header(token)
-    except Exception as e:
-        return jsonify({"step": "bad_header", "error": str(e)}), 400
-
-    claims = _verify_supabase_jwt(token)
-    if not claims:
-        return jsonify({
-            "step":   "verify_failed",
-            "alg":    header.get("alg"),
-            "kid":    header.get("kid"),
-            "jwks_url": _jwks_url(),
-            "jwks_cached_key_count": len(_jwks_cache),
-        }), 401
-
-    return jsonify({
-        "step":        "ok",
-        "alg":         header.get("alg"),
-        "claim_keys":  list(claims.keys()),
-        "sub_prefix":  claims.get("sub", "")[:8] + "…",
-        "aud":         claims.get("aud"),
-        "exp_valid":   True,
-    }), 200
-
-
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
-
-@app.get("/debug/auth-probe")
-def debug_auth_probe():
-    """Temporary diagnostic endpoint — remove after confirming auth works."""
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return jsonify({"step": "no_bearer_header"}), 400
-    token = auth_header[7:].strip()
-    try:
-        from jose import jwt as _j
-        header = _j.get_unverified_header(token)
-    except Exception as e:
-        return jsonify({"step": "bad_header", "error": str(e)}), 400
-
-    claims = _verify_supabase_jwt(token)
-    if not claims:
-        return jsonify({
-            "step":   "verify_failed",
-            "alg":    header.get("alg"),
-            "kid":    header.get("kid"),
-            "jwks_url": _jwks_url(),
-            "jwks_cached_key_count": len(_jwks_cache),
-        }), 401
-
-    return jsonify({
-        "step":        "ok",
-        "alg":         header.get("alg"),
-        "claim_keys":  list(claims.keys()),
-        "sub_prefix":  claims.get("sub", "")[:8] + "…",
-        "aud":         claims.get("aud"),
-        "exp_valid":   True,
-    }), 200
