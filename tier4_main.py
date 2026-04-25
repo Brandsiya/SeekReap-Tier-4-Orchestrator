@@ -1,5 +1,5 @@
 # SeekReap Tier-4 Orchestrator
-# Build: 2026-04-22 — fully hardened
+# Build: 2026-04-25 — JWKS auth fixed with proper headers
 # SeekReap Tier-4 Orchestrator
 # Build: 2026-04-22 — fully hardened
 from flask import Flask, request, jsonify
@@ -126,7 +126,7 @@ _JWKS_TTL_SECONDS        = 6 * 3600   # 6 hours
 
 def _jwks_url() -> str:
     base = SUPABASE_URL.rstrip("/")
-    return f"{base}/auth/v1/keys"
+    return f"{base}/auth/v1/.well-known/jwks.json"
 
 
 def _fetch_jwks(force: bool = False) -> list:
@@ -144,7 +144,7 @@ def _fetch_jwks(force: bool = False) -> list:
             return _jwks_cache
 
         url = _jwks_url()
-        if not url or url == "/auth/v1/keys":
+        if not url or url == "/auth/v1/.well-known/jwks.json":
             log_error("auth", "jwks_supabase_url_not_set",
                       hint="Set SUPABASE_URL env var to https://xxxx.supabase.co")
             return _jwks_cache
