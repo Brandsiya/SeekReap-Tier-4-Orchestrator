@@ -1,5 +1,7 @@
 # SeekReap Tier-4 Orchestrator
 # Build: 2026-04-22 — fully hardened
+# SeekReap Tier-4 Orchestrator
+# Build: 2026-04-22 — fully hardened
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import uuid, os, json, psycopg2, re, requests, random, string, hmac, hashlib, secrets
@@ -128,26 +130,62 @@ def _jwks_url() -> str:
 
 
 def _fetch_jwks(force: bool = False) -> list:
+    """
+    Fetches Supabase JWKS and caches them.
+
+    Supabase's /auth/v1/keys endpoint requires the anon key as
+    'apikey' header — without it the endpoint returns a 401 that
+    looks like a network error and leaves jwks_cache empty forever.
+    """
     global _jwks_cache, _jwks_fetched_at
     now = _time.time()
     with _jwks_lock:
         if not force and _jwks_cache and (now - _jwks_fetched_at) < _JWKS_TTL_SECONDS:
             return _jwks_cache
+
+        url = _jwks_url()
+        if not url or url == "/auth/v1/keys":
+            log_error("auth", "jwks_supabase_url_not_set",
+                      hint="Set SUPABASE_URL env var to https://xxxx.supabase.co")
+            return _jwks_cache
+
+        # Supabase requires the anon/service key on this endpoint
+        supabase_anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+        headers = {}
+        if supabase_anon_key:
+            headers["apikey"] = supabase_anon_key
+        else:
+            log_warn("auth", "jwks_anon_key_missing",
+                     hint="Set SUPABASE_ANON_KEY — some Supabase deployments require it")
+
+        log_info("auth", "fetching_jwks", url=url, has_apikey=bool(supabase_anon_key))
         try:
-            url = _jwks_url()
-            log_info("auth", "fetching_jwks", url=url)
-            resp = requests.get(url, timeout=5)
+            resp = requests.get(url, headers=headers, timeout=10)
+            log_info("auth", "jwks_http_response",
+                     status=resp.status_code, body_preview=resp.text[:300])
             if resp.status_code == 200:
-                keys = resp.json().get("keys", [])
+                body = resp.json()
+                # Supabase returns {"keys": [...]} — handle both shapes
+                keys = body.get("keys") or body if isinstance(body, list) else []
+                if not keys:
+                    log_warn("auth", "jwks_empty_response", body=str(body)[:300])
+                    return _jwks_cache
                 _jwks_cache      = keys
                 _jwks_fetched_at = now
                 log_info("auth", "jwks_refreshed", key_count=len(keys))
                 return keys
             else:
-                log_warn("auth", "jwks_fetch_non200", status=resp.status_code, body=resp.text[:200])
+                log_error("auth", "jwks_fetch_non200",
+                          status=resp.status_code, body=resp.text[:400])
+        except requests.exceptions.ConnectionError as e:
+            log_error("auth", "jwks_connection_error", error=str(e),
+                      hint="Fly container cannot reach Supabase — check egress/DNS")
+        except requests.exceptions.Timeout:
+            log_error("auth", "jwks_timeout", url=url)
         except Exception as e:
-            log_warn("auth", "jwks_fetch_error", error=str(e))
-        return _jwks_cache
+            log_error("auth", "jwks_fetch_error", error=str(e))
+
+        return _jwks_cache  # return stale cache rather than crashing
 
 
 def _verify_supabase_jwt(token: str) -> dict | None:
@@ -945,10 +983,51 @@ def debug_env():
     })
 
 
+@app.get("/debug/jwks-probe")
+def debug_jwks_probe():
+    """
+    Live JWKS fetch diagnostic — shows exactly what the Supabase key endpoint returns.
+    Remove after confirming auth works.
+    """
+    url = _jwks_url()
+    anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+    supabase_url_set = bool(SUPABASE_URL)
+
+    result = {
+        "supabase_url_set": supabase_url_set,
+        "jwks_url":         url,
+        "anon_key_set":     bool(anon_key),
+        "cached_key_count": len(_jwks_cache),
+    }
+
+    if not supabase_url_set:
+        result["error"] = "SUPABASE_URL env var is not set"
+        return jsonify(result), 500
+
+    headers = {"apikey": anon_key} if anon_key else {}
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        result["http_status"] = resp.status_code
+        result["response_preview"] = resp.text[:600]
+        if resp.status_code == 200:
+            body = resp.json()
+            keys = body.get("keys") or (body if isinstance(body, list) else [])
+            result["key_count"] = len(keys)
+            result["key_ids"] = [k.get("kid") for k in keys]
+            result["step"] = "ok"
+        else:
+            result["step"] = "http_error"
+    except Exception as e:
+        result["step"]  = "exception"
+        result["error"] = str(e)
+
+    return jsonify(result), 200 if result.get("step") == "ok" else 500
+
+
 @app.get("/debug/auth-probe")
 def debug_auth_probe():
     """
-    Temporary diagnostic endpoint — remove after confirming auth works.
+    Token verification diagnostic. Remove after confirming auth works.
     Returns claim keys (not values) so nothing sensitive is exposed.
     """
     auth_header = request.headers.get("Authorization", "")
@@ -968,6 +1047,9 @@ def debug_auth_probe():
             "kid":                   header.get("kid"),
             "jwks_url":              _jwks_url(),
             "jwks_cached_key_count": len(_jwks_cache),
+            "supabase_url_set":      bool(SUPABASE_URL),
+            "anon_key_set":          bool(os.environ.get("SUPABASE_ANON_KEY")),
+            "hint": "Run GET /debug/jwks-probe to see the live JWKS fetch result",
         }), 401
 
     return jsonify({
