@@ -163,8 +163,11 @@ def _fetch_jwks(force: bool = False) -> list:
                      status=resp.status_code, body_preview=resp.text[:300])
             if resp.status_code == 200:
                 body = resp.json()
-                # Supabase returns {"keys": [...]} — handle both shapes
-                keys = body.get("keys") or body if isinstance(body, list) else []
+                # body is {"keys": [...]} — extract the list
+                if isinstance(body, list):
+                    keys = body
+                else:
+                    keys = body.get("keys") or []
                 if not keys:
                     log_warn("auth", "jwks_empty_response", body=str(body)[:300])
                     return _jwks_cache
