@@ -1,6 +1,4 @@
 # SeekReap Tier-4 Orchestrator
-# Build: 2026-04-25 — JWKS auth fixed with proper headers
-# SeekReap Tier-4 Orchestrator
 # Build: 2026-04-22 — fully hardened
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -2057,6 +2055,27 @@ def _shutdown_pool():
             log_warn("db", "pool_close_error", error=str(_e))
 
 _atexit.register(_shutdown_pool)
+
+
+
+# ── Startup: pre-warm JWKS cache ──────────────────────────────────────────────
+# Fetches Supabase public keys at module load time so every process (including
+# gunicorn worker forks) has a warm cache before the first request arrives.
+# Without this, a cold-start race between Fly machines means auth-probe hits
+# machine A (warm) while /api/payments/initiate hits machine B (cold) → 401.
+def _warmup_jwks():
+    if not SUPABASE_URL:
+        log_warn("auth", "jwks_warmup_skipped", reason="SUPABASE_URL not set")
+        return
+    keys = _fetch_jwks(force=True)
+    if keys:
+        log_info("auth", "jwks_warmup_ok", key_count=len(keys),
+                 kids=[k.get("kid") for k in keys])
+    else:
+        log_error("auth", "jwks_warmup_failed",
+                  hint="Check SUPABASE_URL and SUPABASE_ANON_KEY secrets")
+
+_warmup_jwks()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
