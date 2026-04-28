@@ -1821,9 +1821,12 @@ def payfast_webhook():
     payment_id = data.get("m_payment_id")
     pf_status  = data.get("payment_status")
 
-    sig_received = data.pop("signature", "")
+    raw_data = request.form
+    sig_received = raw_data.get("signature", "")
     sig_str = "&".join(
-        f"{k}={urllib.parse.quote_plus(str(v))}" for k, v in data.items() if v
+        f"{k}={urllib.parse.quote_plus(str(raw_data[k]))}"
+        for k in raw_data.keys()
+        if k != "signature" and raw_data[k] is not None
     )
     if PAYFAST_PASSPHRASE:
         sig_str += f"&passphrase={urllib.parse.quote_plus(PAYFAST_PASSPHRASE)}"
