@@ -2083,5 +2083,22 @@ def _warmup_jwks():
 
 _warmup_jwks()
 
+
+@app.get("/api/payment/probe")
+def payment_probe():
+    """Internal health probe for payment systems — used by system monitor."""
+    payfast_ok  = bool(PAYFAST_MERCHANT_KEY and PAYFAST_MERCHANT_ID)
+    paystack_ok = bool(PAYSTACK_SECRET)
+
+    return jsonify({
+        'payfast_ok'     : payfast_ok,
+        'payfast_status' : 'Ready' if payfast_ok else 'Missing PAYFAST_MERCHANT_KEY / PAYFAST_MERCHANT_ID',
+        'paystack_ok'    : paystack_ok,
+        'paystack_status': 'Ready' if paystack_ok else 'Missing PAYSTACK_SECRET_KEY',
+        'sig_valid'      : payfast_ok,
+        'webhook_ok'     : False,
+        'note'           : 'PayFast and Paystack accounts pending external verification review.'
+    }), 200
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
