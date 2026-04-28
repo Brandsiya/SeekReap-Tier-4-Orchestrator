@@ -13,4 +13,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY tier4_main.py .
 
-CMD ["python", "tier4_main.py"]
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:8080", "--timeout", "120", "--preload", "tier4_main:app"]
