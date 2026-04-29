@@ -16,6 +16,7 @@ app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
 CORS(app, origins=[
     "https://seekreap-backend-dev.fly.dev",
     "https://seekreap-frontend.onrender.com",
+    "https://brandsiya.github.io",
     "http://localhost:3000",
     "http://localhost:8080",
 ])
