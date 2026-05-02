@@ -2103,3 +2103,17 @@ def payment_probe():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
+@app.get("/api/debug/env-preview")
+def debug_env_preview():
+    """Temporary endpoint to preview env vars (masked)"""
+    import os
+    env_vars = {
+        "DATABASE_URL": os.environ.get("DATABASE_URL", "NOT_SET")[:30] + "...",
+        "SUPABASE_URL": os.environ.get("SUPABASE_URL", "NOT_SET"),
+        "SUPABASE_ANON_KEY": os.environ.get("SUPABASE_ANON_KEY", "NOT_SET")[:20] + "...",
+        "SUPABASE_JWT_SECRET": "***SET***" if os.environ.get("SUPABASE_JWT_SECRET") else "NOT_SET",
+        "PAYSTACK_SECRET_KEY": "***SET***" if os.environ.get("PAYSTACK_SECRET_KEY") else "NOT_SET",
+        "FRONTEND_URL": os.environ.get("FRONTEND_URL", "NOT_SET"),
+    }
+    return jsonify(env_vars)
