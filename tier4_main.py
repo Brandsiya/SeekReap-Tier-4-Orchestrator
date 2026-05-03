@@ -1436,6 +1436,7 @@ def init_paystack(payment_id, data):
         "amount":       data["amount"],
         "reference":    str(payment_id),
         "callback_url": FRONTEND_URL + "/payment_success.html",
+        "notify_url":   TIER4_INTERNAL + "/api/payments/webhook/paystack",
         "metadata": {
             "payment_id":    str(payment_id),
             "plan":          data["plan"],
