@@ -1,37 +1,46 @@
-# flyctl launch added from .gitignore
+# Git
+.git/
+.gitignore
 
-# Backups
-# Database (if local)
-# Downloads and temp files
-# Environment files
-# IDE files
-# Logs
-# Node modules
-# OS files
 # Python cache
-# Reports (if generated)
-**/*.backup
-**/*.bak
-**/*.log
-**/*.old
-**/*.pyc
-**/.DS_Store
-**/.env
-**/.env.local
-**/.idea
-**/.vscode
-**/SeekReap-Tier-4-Orchestrator.BACKUP
-**/Thumbs.db
-**/__pycache__
-**/backups
-**/download?format=pdf
-**/logs
-**/main
-**/node_modules
-**/pipelines/reports/*.json
-**/pipelines/reports/*.pdf
-**/reports/*.json
-**/reports/*.pdf
-**/seekreap-tier4-db/*.db
-**/tier4.pid
-fly.toml
+__pycache__/
+*.py[cod]
+*.so
+
+# Environment
+.env
+.env.local
+.python-version
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.backup
+*.bak
+*~
+tier4_main.py.backup*
+
+# Patch files
+auth_patch.py
+patch_*.py
+fix_*.py
+
+# Test files
+test_*.py
+*.tmp
+
+# Config files (not needed in Docker)
+docker-compose.yml
+cloudbuild.yaml
+.gcloudignore
+render.yaml

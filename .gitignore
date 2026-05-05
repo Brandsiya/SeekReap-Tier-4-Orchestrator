@@ -1,35 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+env/
+venv/
+.venv/
 
 # Backups
-# Database (if local)
-# Downloads and temp files
-# Environment files
-# IDE files
-# Logs
-# Node modules
-# OS files
-# Python cache
-# Reports (if generated)
 *.backup
 *.bak
-*.log
-*.old
-*.pyc
-.DS_Store
+*~
+
+# Test files
+test_*.py
+*.tmp
+*.wav
+*.mp3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Environment
 .env
 .env.local
-.idea/
-.vscode/
-SeekReap-Tier-4-Orchestrator.BACKUP/
+.env.*.local
+
+# Logs
+*.log
+
+# OS
+.DS_Store
 Thumbs.db
-__pycache__/
-backups/
-download?format=pdf
-logs/
-main
+
+# Generated files
+*.png
+*.jpg
+*.gif
+*.sql
+
+# Cloud build (not using)
+cloudbuild.yaml
+.gcloudignore
+
+# Node.js (not needed)
+package.json
+package-lock.json
 node_modules/
-pipelines/reports/*.json
-pipelines/reports/*.pdf
-reports/*.json
-reports/*.pdf
-seekreap-tier4-db/*.db
-tier4.pid
+
+# Patch/temporary files
+auth_patch.py
+patch_*.py
+fix_*.py
+
+# Docker compose
+docker-compose.yml
+
+# Render (deprecated)
+render.yaml
+
+# Backup files
+tier4_main.py.backup*
