@@ -2166,7 +2166,7 @@ def _log_agreement_event(cur, agreement_id, event_type, actor_id, event_data):
 
 
 @app.route('/api/agreements/create', methods=['POST'])
-@require_auth
+@_require_auth
 def create_agreement():
     """Create a co-ownership agreement for a submission."""
     creator_id = g.user_id
@@ -2270,7 +2270,7 @@ def create_agreement():
 
 
 @app.route('/api/agreements/<agreement_id>', methods=['GET'])
-@require_auth
+@_require_auth
 def get_agreement(agreement_id):
     """Get agreement details including participants."""
     creator_id = g.user_id
@@ -2335,7 +2335,7 @@ def get_agreement(agreement_id):
 
 
 @app.route('/api/agreements/<agreement_id>/accept', methods=['POST'])
-@require_auth
+@_require_auth
 def accept_agreement(agreement_id):
     """Participant accepts invitation. Activates if all have accepted."""
     user_id = g.user_id
@@ -2431,7 +2431,7 @@ def accept_agreement(agreement_id):
 
 
 @app.route('/api/agreements/<agreement_id>/events', methods=['GET'])
-@require_auth
+@_require_auth
 def get_agreement_events(agreement_id):
     """Return the full event chain for verification."""
     try:
@@ -2457,7 +2457,7 @@ def get_agreement_events(agreement_id):
 
 
 @app.route('/api/agreements/by-submission/<submission_id>', methods=['GET'])
-@require_auth
+@_require_auth
 def get_agreements_by_submission(submission_id):
     """List all agreements for a submission."""
     try:
