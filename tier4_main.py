@@ -2117,3 +2117,367 @@ def debug_env_preview():
         "FRONTEND_URL": os.environ.get("FRONTEND_URL", "NOT_SET"),
     }
     return jsonify(env_vars)
+
+
+# ══════════════════════════════════════════════════════════════════
+# CO-OWNERSHIP AGREEMENT ENDPOINTS
+# ══════════════════════════════════════════════════════════════════
+
+import hashlib, secrets
+from datetime import datetime, timezone, timedelta
+
+def _canonical_json(obj: dict) -> str:
+    """Deterministic JSON: sorted keys, UTC timestamps, 2dp numerics."""
+    import json
+    def _clean(v):
+        if isinstance(v, dict):
+            return {k: _clean(v[k]) for k in sorted(v.keys())}
+        if isinstance(v, list):
+            return [_clean(i) for i in v]
+        if isinstance(v, float):
+            return round(v, 2)
+        return v
+    return json.dumps(_clean(obj), separators=(',', ':'), sort_keys=True, default=str)
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+def _chain_hash(previous_hash: str, event_data: dict) -> str:
+    payload = (previous_hash or '') + _canonical_json(event_data)
+    return _sha256(payload)
+
+def _log_agreement_event(cur, agreement_id, event_type, actor_id, event_data):
+    """Append a chained event to agreement_events."""
+    cur.execute(
+        "SELECT event_hash FROM public.agreement_events "
+        "WHERE agreement_id = %s ORDER BY created_at DESC LIMIT 1",
+        (agreement_id,)
+    )
+    row = cur.fetchone()
+    prev_hash = row[0] if row else ''
+    new_hash = _chain_hash(prev_hash, {'type': event_type, **event_data})
+    cur.execute("""
+        INSERT INTO public.agreement_events
+            (agreement_id, event_type, actor_id, event_data, event_hash, previous_hash)
+        VALUES (%s, %s, %s, %s::jsonb, %s, %s)
+    """, (agreement_id, event_type, actor_id,
+          json.dumps(event_data), new_hash, prev_hash or None))
+    return new_hash
+
+
+@app.route('/api/agreements/create', methods=['POST'])
+@require_auth
+def create_agreement():
+    """Create a co-ownership agreement for a submission."""
+    creator_id = g.user_id
+    data       = request.get_json(force=True)
+
+    submission_id = data.get('submission_id')
+    participants  = data.get('participants', [])   # list of {email, display_name, role, ownership_pct}
+    rights        = data.get('rights', {})
+
+    if not submission_id:
+        return jsonify({'error': 'submission_id required'}), 400
+    if not participants:
+        return jsonify({'error': 'at least one participant required'}), 400
+
+    # Validate ownership sums
+    total_pct = sum(float(p.get('ownership_pct', 0)) for p in participants)
+    if abs(total_pct - 100.0) > 0.01:
+        return jsonify({'error': f'ownership_pct must sum to 100 (got {total_pct})'}), 400
+
+    try:
+        with db_cursor() as (conn, cur):
+            # Verify submission belongs to creator
+            cur.execute(
+                "SELECT id, cert_id FROM public.submissions WHERE id = %s AND creator_id = %s",
+                (submission_id, creator_id)
+            )
+            sub = cur.fetchone()
+            if not sub:
+                return jsonify({'error': 'submission not found or not owned by you'}), 404
+
+            # Create agreement
+            agreement_id = str(uuid.uuid4())
+            cur.execute("""
+                INSERT INTO public.coownership_agreements (
+                    id, submission_id, created_by, status,
+                    commercial_use, derivative_works, sublicensing,
+                    ai_training_permitted, attribution_required,
+                    publication_requires_all, minimum_publication_threshold,
+                    dispute_resolution, governing_jurisdiction,
+                    template_version
+                ) VALUES (
+                    %s, %s, %s, 'pending',
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, 'v1.0'
+                )
+            """, (
+                agreement_id, submission_id, creator_id,
+                rights.get('commercial_use', True),
+                rights.get('derivative_works', True),
+                rights.get('sublicensing', False),
+                rights.get('ai_training_permitted', False),
+                rights.get('attribution_required', True),
+                rights.get('publication_requires_all', False),
+                float(rights.get('minimum_publication_threshold', 50.0)),
+                rights.get('dispute_resolution', 'majority_vote'),
+                rights.get('governing_jurisdiction')
+            ))
+
+            # Add participants
+            for p in participants:
+                token   = secrets.token_urlsafe(32)
+                expires = datetime.now(timezone.utc) + timedelta(days=14)
+                cur.execute("""
+                    INSERT INTO public.agreement_participants (
+                        agreement_id, user_id, email, display_name, role,
+                        ownership_pct, royalty_pct, attribution_name,
+                        public_attribution, acceptance_token, acceptance_expires_at, status
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'invited'
+                    )
+                """, (
+                    agreement_id,
+                    p.get('user_id', ''),
+                    p['email'],
+                    p.get('display_name', ''),
+                    p.get('role', 'co-author'),
+                    float(p['ownership_pct']),
+                    float(p.get('royalty_pct', p['ownership_pct'])),
+                    p.get('attribution_name', p.get('display_name', '')),
+                    p.get('public_attribution', True),
+                    token,
+                    expires
+                ))
+
+            # Log creation event
+            _log_agreement_event(cur, agreement_id, 'created', creator_id, {
+                'submission_id': submission_id,
+                'participant_count': len(participants)
+            })
+
+            conn.commit()
+
+        return jsonify({
+            'status': 'created',
+            'agreement_id': agreement_id,
+            'participant_count': len(participants)
+        }), 201
+
+    except Exception as e:
+        logger.exception('create_agreement error')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/agreements/<agreement_id>', methods=['GET'])
+@require_auth
+def get_agreement(agreement_id):
+    """Get agreement details including participants."""
+    creator_id = g.user_id
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT a.id, a.submission_id, a.status, a.created_by,
+                       a.commercial_use, a.derivative_works, a.sublicensing,
+                       a.ai_training_permitted, a.attribution_required,
+                       a.dispute_resolution, a.governing_jurisdiction,
+                       a.agreement_hash, a.activated_at, a.created_at,
+                       a.minimum_publication_threshold, a.template_version
+                FROM public.coownership_agreements a
+                WHERE a.id = %s
+            """, (agreement_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({'error': 'not found'}), 404
+
+            cur.execute("""
+                SELECT user_id, email, display_name, role, ownership_pct,
+                       royalty_pct, attribution_name, status, invited_at, accepted_at
+                FROM public.agreement_participants
+                WHERE agreement_id = %s ORDER BY ownership_pct DESC
+            """, (agreement_id,))
+            parts = cur.fetchall()
+
+            return jsonify({
+                'agreement_id':     str(row[0]),
+                'submission_id':    str(row[1]),
+                'status':           row[2],
+                'created_by':       row[3],
+                'rights': {
+                    'commercial_use':              row[4],
+                    'derivative_works':            row[5],
+                    'sublicensing':                row[6],
+                    'ai_training_permitted':       row[7],
+                    'attribution_required':        row[8],
+                    'dispute_resolution':          row[9],
+                    'governing_jurisdiction':      row[10],
+                    'minimum_publication_threshold': float(row[14]) if row[14] else 50.0
+                },
+                'agreement_hash':   row[11],
+                'activated_at':     row[12].isoformat() if row[12] else None,
+                'created_at':       row[13].isoformat() if row[13] else None,
+                'template_version': row[15],
+                'participants': [{
+                    'user_id':          p[0],
+                    'email':            p[1],
+                    'display_name':     p[2],
+                    'role':             p[3],
+                    'ownership_pct':    float(p[4]),
+                    'royalty_pct':      float(p[5]) if p[5] else None,
+                    'attribution_name': p[6],
+                    'status':           p[7],
+                    'invited_at':       p[8].isoformat() if p[8] else None,
+                    'accepted_at':      p[9].isoformat() if p[9] else None
+                } for p in parts]
+            })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/agreements/<agreement_id>/accept', methods=['POST'])
+@require_auth
+def accept_agreement(agreement_id):
+    """Participant accepts invitation. Activates if all have accepted."""
+    user_id = g.user_id
+    data    = request.get_json(force=True) or {}
+    token   = data.get('token')
+
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT id, status, acceptance_expires_at
+                FROM public.agreement_participants
+                WHERE agreement_id = %s AND acceptance_token = %s
+            """, (agreement_id, token))
+            part = cur.fetchone()
+            if not part:
+                return jsonify({'error': 'invalid token'}), 403
+            if part[1] != 'invited':
+                return jsonify({'error': f'already {part[1]}'}), 400
+            if part[2] and part[2] < datetime.now(timezone.utc):
+                return jsonify({'error': 'invitation expired'}), 410
+
+            # Mark accepted
+            cur.execute("""
+                UPDATE public.agreement_participants
+                SET status = 'accepted', accepted_at = NOW(),
+                    acceptance_ip = %s
+                WHERE id = %s
+            """, (request.remote_addr, str(part[0])))
+
+            _log_agreement_event(cur, agreement_id, 'participant_accepted', user_id, {
+                'participant_id': str(part[0])
+            })
+
+            # Check if all accepted → activate
+            cur.execute("""
+                SELECT COUNT(*) FROM public.agreement_participants
+                WHERE agreement_id = %s AND status != 'accepted'
+            """, (agreement_id,))
+            pending = cur.fetchone()[0]
+
+            activated = False
+            if pending == 0:
+                # Build canonical snapshot
+                cur.execute("""
+                    SELECT a.*, array_agg(
+                        json_build_object(
+                            'user_id', p.user_id,
+                            'email', p.email,
+                            'role', p.role,
+                            'ownership_pct', p.ownership_pct,
+                            'royalty_pct', p.royalty_pct
+                        ) ORDER BY p.ownership_pct DESC
+                    ) AS parts
+                    FROM public.coownership_agreements a
+                    JOIN public.agreement_participants p ON p.agreement_id = a.id
+                    WHERE a.id = %s
+                    GROUP BY a.id
+                """, (agreement_id,))
+                snap_row = cur.fetchone()
+
+                canonical = _canonical_json({
+                    'agreement_id':    agreement_id,
+                    'submission_id':   str(snap_row[1]),
+                    'template':        snap_row[15] if len(snap_row) > 15 else 'v1.0',
+                    'activated_at':    datetime.now(timezone.utc).isoformat(),
+                    'participants':    snap_row[-1],
+                    'canon_version':   'v1'
+                })
+                agreement_hash = _sha256(canonical)
+
+                cur.execute("""
+                    UPDATE public.coownership_agreements
+                    SET status = 'active',
+                        agreement_hash = %s,
+                        agreement_json = %s::jsonb,
+                        activated_at = NOW()
+                    WHERE id = %s
+                """, (agreement_hash, canonical, agreement_id))
+
+                _log_agreement_event(cur, agreement_id, 'activated', user_id, {
+                    'agreement_hash': agreement_hash
+                })
+                activated = True
+
+            conn.commit()
+            return jsonify({
+                'status': 'accepted',
+                'agreement_activated': activated
+            })
+    except Exception as e:
+        logger.exception('accept_agreement error')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/agreements/<agreement_id>/events', methods=['GET'])
+@require_auth
+def get_agreement_events(agreement_id):
+    """Return the full event chain for verification."""
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT event_type, actor_id, event_data,
+                       event_hash, previous_hash, created_at
+                FROM public.agreement_events
+                WHERE agreement_id = %s
+                ORDER BY created_at ASC
+            """, (agreement_id,))
+            events = cur.fetchall()
+            return jsonify({'events': [{
+                'event_type':    e[0],
+                'actor_id':      e[1],
+                'event_data':    e[2],
+                'event_hash':    e[3],
+                'previous_hash': e[4],
+                'created_at':    e[5].isoformat()
+            } for e in events]})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/agreements/by-submission/<submission_id>', methods=['GET'])
+@require_auth
+def get_agreements_by_submission(submission_id):
+    """List all agreements for a submission."""
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT id, status, created_by, created_at,
+                       agreement_hash, activated_at, version
+                FROM public.coownership_agreements
+                WHERE submission_id = %s
+                ORDER BY version DESC
+            """, (submission_id,))
+            rows = cur.fetchall()
+            return jsonify({'agreements': [{
+                'agreement_id':   str(r[0]),
+                'status':         r[1],
+                'created_by':     r[2],
+                'created_at':     r[3].isoformat(),
+                'agreement_hash': r[4],
+                'activated_at':   r[5].isoformat() if r[5] else None,
+                'version':        r[6]
+            } for r in rows]})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
