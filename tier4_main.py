@@ -2486,3 +2486,94 @@ def get_agreements_by_submission(submission_id):
             } for r in rows]})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════
+# AGREEMENT CHAIN VERIFICATION ENDPOINT
+# ══════════════════════════════════════════════════════════════════
+
+@app.route('/api/agreements/<agreement_id>/verify-chain', methods=['GET'])
+def verify_agreement_chain(agreement_id):
+    """Recompute and verify the entire event chain for tamper detection."""
+    import hashlib, json as _json
+
+    def _recompute_hash(previous_hash, event_type, event_data):
+        def _clean(v):
+            if isinstance(v, dict):
+                return {k: _clean(v[k]) for k in sorted(v.keys())}
+            if isinstance(v, list):
+                return [_clean(i) for i in v]
+            if isinstance(v, float):
+                return round(v, 2)
+            return v
+        payload_obj = _clean({'type': event_type, **(event_data or {})})
+        payload = (previous_hash or '') + _json.dumps(
+            payload_obj, separators=(',', ':'), sort_keys=True, default=str
+        )
+        return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+    try:
+        with db_cursor() as (conn, cur):
+            # Check agreement exists (no auth required — chain is public proof)
+            cur.execute(
+                "SELECT id, status FROM public.coownership_agreements WHERE id = %s",
+                (agreement_id,)
+            )
+            agreement = cur.fetchone()
+            if not agreement:
+                return jsonify({'error': 'agreement not found'}), 404
+
+            cur.execute("""
+                SELECT event_type, event_data, event_hash, previous_hash, created_at
+                FROM public.agreement_events
+                WHERE agreement_id = %s
+                ORDER BY created_at ASC
+            """, (agreement_id,))
+            events = cur.fetchall()
+
+            if not events:
+                return jsonify({
+                    'agreement_id': agreement_id,
+                    'status': agreement[1],
+                    'chain_valid': True,
+                    'event_count': 0,
+                    'message': 'No events yet'
+                })
+
+            errors = []
+            prev_hash = ''
+            for i, (event_type, event_data, stored_hash, stored_prev, created_at) in enumerate(events):
+                # Verify previous_hash linkage
+                if stored_prev != (prev_hash or None) and not (stored_prev is None and prev_hash == ''):
+                    errors.append({
+                        'event_index': i,
+                        'event_type': event_type,
+                        'error': 'previous_hash mismatch',
+                        'expected': prev_hash or None,
+                        'stored': stored_prev
+                    })
+
+                # Recompute hash
+                recomputed = _recompute_hash(prev_hash, event_type, event_data)
+                if recomputed != stored_hash:
+                    errors.append({
+                        'event_index': i,
+                        'event_type': event_type,
+                        'error': 'hash_mismatch',
+                        'recomputed': recomputed,
+                        'stored': stored_hash
+                    })
+
+                prev_hash = stored_hash
+
+            return jsonify({
+                'agreement_id': agreement_id,
+                'status': agreement[1],
+                'chain_valid': len(errors) == 0,
+                'event_count': len(events),
+                'final_hash': prev_hash,
+                'errors': errors
+            })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
