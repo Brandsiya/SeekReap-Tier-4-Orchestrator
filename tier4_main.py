@@ -304,22 +304,50 @@ _db_pool: "_pg_pool.ThreadedConnectionPool | None" = None
 def _get_pool() -> "_pg_pool.ThreadedConnectionPool":
     global _db_pool
     if _db_pool is None or _db_pool.closed:
+        dsn = os.environ["DATABASE_URL"]
+        # Add keepalives if not already present
+        if "keepalives" not in dsn:
+            sep = "&" if "?" in dsn else "?"
+            dsn = dsn + sep + "keepalives=1&keepalives_idle=30&keepalives_interval=10&keepalives_count=5"
         _db_pool = _pg_pool.ThreadedConnectionPool(
             minconn=2, maxconn=10,
-            dsn=os.environ["DATABASE_URL"],
-            connect_timeout=5,
+            dsn=dsn,
+            connect_timeout=10,
         )
     return _db_pool
 
 def get_db():
-    return _get_pool().getconn()
+    pool = _get_pool()
+    conn = pool.getconn()
+    # Validate connection — discard and replace if stale
+    try:
+        conn.cursor().execute("SELECT 1")
+    except Exception:
+        try:
+            pool.putconn(conn, close=True)
+        except Exception:
+            pass
+        conn = psycopg2.connect(
+            os.environ["DATABASE_URL"],
+            connect_timeout=10,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5,
+        )
+    return conn
 
 def put_db(conn):
     if conn is not None:
         try:
+            if conn.closed:
+                return
             _get_pool().putconn(conn)
         except Exception:
-            pass
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 @contextmanager
