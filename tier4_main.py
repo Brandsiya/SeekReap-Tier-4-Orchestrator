@@ -2154,18 +2154,42 @@ def debug_env_preview():
 import hashlib, secrets
 from datetime import datetime, timezone, timedelta
 
+# ══════════════════════════════════════════════════════════════════
+# CANONICALIZATION SPEC v1 — FROZEN
+# Changes to this spec require a new version and migration path.
+# Rules:
+#   - Encoding:      UTF-8, NFC normalization
+#   - Keys:          sorted lexicographically, all levels
+#   - Floats:        rounded to 2 decimal places
+#   - Integers:      unchanged
+#   - None/null:     serialized as JSON null
+#   - Strings:       NFC unicode normalized, no truncation
+#   - Timestamps:    must be ISO 8601 UTC strings before passing in
+#   - Separators:    no spaces (',', ':')
+#   - Booleans:      true/false lowercase (standard JSON)
+# ══════════════════════════════════════════════════════════════════
+CANON_VERSION = 'v1'
+
 def _canonical_json(obj: dict) -> str:
-    """Deterministic JSON: sorted keys, UTC timestamps, 2dp numerics."""
-    import json
+    """Deterministic JSON serialization per CANON_VERSION v1 spec."""
+    import json, unicodedata
     def _clean(v):
+        if v is None:
+            return None
         if isinstance(v, dict):
             return {k: _clean(v[k]) for k in sorted(v.keys())}
         if isinstance(v, list):
             return [_clean(i) for i in v]
         if isinstance(v, float):
             return round(v, 2)
-        return v
-    return json.dumps(_clean(obj), separators=(',', ':'), sort_keys=True, default=str)
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            return unicodedata.normalize('NFC', v)
+        return str(v)
+    return json.dumps(_clean(obj), separators=(',', ':'), sort_keys=True, ensure_ascii=False)
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
