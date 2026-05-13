@@ -2629,3 +2629,221 @@ def verify_agreement_chain(agreement_id):
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════
+# PDF GENERATION — corrected, deterministic, audit-logged
+# agreement_hash = legal identity (canonical snapshot hash)
+# pdf_hash       = tamper detection only (not legal proof)
+# ══════════════════════════════════════════════════════════════════
+
+VERIFY_BASE_URL = os.environ.get('FRONTEND_URL', 'https://seekreap-tier-6-frontend.fly.dev')
+
+@app.route('/api/agreements/<agreement_id>/generate-pdf', methods=['POST'])
+def generate_agreement_pdf(agreement_id):
+    """Generate a deterministic PDF from structured agreement data."""
+    claims, err = _require_auth(request)
+    if err: return err
+    actor_id = claims.get("sub", "")
+
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT a.id, a.submission_id, a.status, a.created_by,
+                       a.created_at, a.activated_at, a.agreement_hash,
+                       a.template_version, a.commercial_use, a.derivative_works,
+                       a.sublicensing, a.ai_training_permitted, a.attribution_required,
+                       a.dispute_resolution, a.governing_jurisdiction,
+                       a.minimum_publication_threshold, a.canonicalization_version
+                FROM public.coownership_agreements a
+                WHERE a.id = %s
+            """, (agreement_id,))
+            agr = cur.fetchone()
+            if not agr:
+                return jsonify({'error': 'agreement not found'}), 404
+            if agr[2] != 'active':
+                return jsonify({'error': 'PDF only available for active agreements'}), 400
+
+            # Verify requester is participant or creator
+            cur.execute("""
+                SELECT 1 FROM public.agreement_participants
+                WHERE agreement_id = %s AND user_id = %s
+                UNION
+                SELECT 1 FROM public.coownership_agreements
+                WHERE id = %s AND created_by = %s
+                LIMIT 1
+            """, (agreement_id, actor_id, agreement_id, actor_id))
+            if not cur.fetchone():
+                return jsonify({'error': 'access denied'}), 403
+
+            # Fetch participants — use attribution_name/display_name only, never raw email
+            cur.execute("""
+                SELECT
+                    COALESCE(attribution_name, display_name, 'Participant') AS name,
+                    role, ownership_pct,
+                    COALESCE(royalty_pct, ownership_pct) AS royalty_pct,
+                    accepted_at, status
+                FROM public.agreement_participants
+                WHERE agreement_id = %s
+                ORDER BY ownership_pct DESC
+            """, (agreement_id,))
+            participants = cur.fetchall()
+
+        # Build PDF
+        from reportlab.pdfgen import canvas as rl_canvas
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.lib import colors
+        import io, hashlib as _hl
+
+        buf = io.BytesIO()
+        W, H = A4
+        c = rl_canvas.Canvas(buf, pagesize=A4)
+
+        # Page overflow helper
+        PAGE_BOTTOM = 25 * mm
+        def _check_page(y, needed=12):
+            if y < PAGE_BOTTOM + needed * mm:
+                c.showPage()
+                # Redraw minimal header on continuation pages
+                c.setFillColor(colors.HexColor('#1A1A2E'))
+                c.setFont('Helvetica-Bold', 9)
+                c.setFillColor(colors.HexColor('#888888'))
+                c.drawString(20*mm, H - 12*mm, f'Agreement {agreement_id[:8]}... (continued)')
+                return H - 22*mm
+            return y
+
+        def _hline(y):
+            c.setStrokeColor(colors.HexColor('#DDDDDD'))
+            c.line(20*mm, y, W - 20*mm, y)
+
+        def _section(title, y):
+            y = _check_page(y, 20)
+            c.setFont('Helvetica-Bold', 9)
+            c.setFillColor(colors.HexColor('#1A1A2E'))
+            c.drawString(20*mm, y, title)
+            _hline(y - 2*mm)
+            return y - 9*mm
+
+        def _field(label, value, y):
+            y = _check_page(y, 8)
+            c.setFont('Helvetica-Bold', 7.5)
+            c.setFillColor(colors.HexColor('#666666'))
+            c.drawString(22*mm, y, f'{label}:')
+            c.setFont('Helvetica', 7.5)
+            c.setFillColor(colors.black)
+            c.drawString(72*mm, y, str(value) if value is not None else '—')
+            return y - 6*mm
+
+        # ── Header ────────────────────────────────────────────────
+        c.setFillColor(colors.HexColor('#1A1A2E'))
+        c.rect(0, H - 28*mm, W, 28*mm, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont('Helvetica-Bold', 15)
+        c.drawString(20*mm, H - 13*mm, 'SeekReap Co-Ownership Agreement')
+        c.setFont('Helvetica', 8)
+        c.drawString(20*mm, H - 20*mm,
+            f'Template: {agr[7]}  |  Canon: {CANON_VERSION}  |  Status: {agr[2].upper()}')
+
+        y = H - 36*mm
+
+        # ── Agreement identity ─────────────────────────────────────
+        y = _section('AGREEMENT IDENTITY', y)
+        y = _field('Agreement ID',   str(agr[0]), y)
+        y = _field('Submission ID',  str(agr[1]), y)
+        y = _field('Created by',     agr[3], y)
+        y = _field('Created at',     str(agr[4])[:19] if agr[4] else '—', y)
+        y = _field('Activated at',   str(agr[5])[:19] if agr[5] else '—', y)
+        y -= 3*mm
+
+        # ── Rights & governance ───────────────────────────────────
+        y = _section('RIGHTS & GOVERNANCE', y)
+        y = _field('Commercial use',         'Yes' if agr[8]  else 'No', y)
+        y = _field('Derivative works',       'Yes' if agr[9]  else 'No', y)
+        y = _field('Sublicensing',           'Yes' if agr[10] else 'No', y)
+        y = _field('AI training',            'Yes' if agr[11] else 'No', y)
+        y = _field('Attribution required',   'Yes' if agr[12] else 'No', y)
+        y = _field('Dispute resolution',     agr[13] or '—', y)
+        y = _field('Jurisdiction',           agr[14] or 'Not specified', y)
+        y = _field('Pub. threshold',         f"{agr[15]}%" if agr[15] else '50%', y)
+        y -= 3*mm
+
+        # ── Participants ──────────────────────────────────────────
+        y = _section('PARTICIPANTS & OWNERSHIP', y)
+        for p in participants:
+            y = _check_page(y, 16)
+            c.setFont('Helvetica-Bold', 8)
+            c.setFillColor(colors.black)
+            c.drawString(22*mm, y, str(p[0]))
+            c.setFont('Helvetica', 7.5)
+            c.setFillColor(colors.HexColor('#555555'))
+            c.drawString(80*mm, y,
+                f'{p[1]}  |  {float(p[2]):.1f}% ownership  |  {float(p[3]):.1f}% royalty')
+            y -= 5*mm
+            c.setFont('Helvetica', 7)
+            accepted_str = str(p[4])[:10] if p[4] else 'pending'
+            c.drawString(26*mm, y, f'Status: {p[5]}  |  Accepted: {accepted_str}')
+            y -= 7*mm
+        y -= 3*mm
+
+        # ── Cryptographic integrity ───────────────────────────────
+        y = _section('CRYPTOGRAPHIC INTEGRITY', y)
+        agreement_hash = agr[6] or '—'
+        # Show full hash — this is the legal identity, not truncated
+        y = _field('Agreement hash', agreement_hash, y)
+        y = _field('Hash algorithm', 'SHA-256', y)
+        y = _field('Canon version',  CANON_VERSION, y)
+        c.setFont('Helvetica', 6.5)
+        c.setFillColor(colors.HexColor('#888888'))
+        c.drawString(22*mm, y,
+            'agreement_hash is the authoritative legal identity. '
+            'The PDF is a rendering of the canonical snapshot.')
+        y -= 8*mm
+
+        # ── Footer ────────────────────────────────────────────────
+        c.setFillColor(colors.HexColor('#F5F5F5'))
+        c.rect(0, 0, W, 22*mm, fill=1, stroke=0)
+        c.setFillColor(colors.HexColor('#888888'))
+        c.setFont('Helvetica', 6.5)
+        c.drawString(20*mm, 15*mm, 'Generated from structured data by SeekReap. '
+                                   'PDF is a representation only — agreement_hash is the canonical proof.')
+        verify_url = f'{VERIFY_BASE_URL}/verify/agreement/{agreement_id}'
+        c.drawString(20*mm, 10*mm, f'Verify: {verify_url}')
+        c.drawString(20*mm, 5*mm, f'Agreement hash: {agreement_hash}')
+
+        c.save()
+        buf.seek(0)
+        pdf_bytes = buf.read()
+
+        # Hash the PDF bytes directly (no hex encoding)
+        pdf_hash = _hl.sha256(pdf_bytes).hexdigest()
+
+        # Store pdf_hash and log audit event
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                UPDATE public.coownership_agreements
+                SET pdf_hash = %s WHERE id = %s
+            """, (pdf_hash, agreement_id))
+            _log_agreement_event(cur, agreement_id, 'pdf_generated', actor_id, {
+                'pdf_hash':       pdf_hash,
+                'agreement_hash': agreement_hash,
+                'canon_version':  CANON_VERSION
+            })
+            conn.commit()
+
+        from flask import Response
+        return Response(
+            pdf_bytes,
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': f'attachment; filename=seekreap-agreement-{agreement_id[:8]}.pdf',
+                'X-Agreement-Hash': agreement_hash,
+                'X-PDF-Hash':       pdf_hash,
+                'X-Canon-Version':  CANON_VERSION,
+                'X-Legal-Note':     'agreement_hash is the canonical legal identity, not pdf_hash'
+            }
+        )
+
+    except Exception as e:
+        logger.exception('generate_agreement_pdf error')
+        return jsonify({'error': str(e)}), 500
