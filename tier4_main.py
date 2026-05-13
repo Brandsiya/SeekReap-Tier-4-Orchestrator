@@ -2202,7 +2202,7 @@ def _log_agreement_event(cur, agreement_id, event_type, actor_id, event_data):
     """Append a chained event to agreement_events."""
     cur.execute(
         "SELECT event_hash FROM public.agreement_events "
-        "WHERE agreement_id = %s ORDER BY created_at DESC LIMIT 1",
+        "WHERE agreement_id = %s ORDER BY created_at DESC, id DESC LIMIT 1",
         (agreement_id,)
     )
     row = cur.fetchone()
@@ -2283,15 +2283,14 @@ def create_agreement():
                 expires = datetime.now(timezone.utc) + timedelta(days=14)
                 cur.execute("""
                     INSERT INTO public.agreement_participants (
-                        agreement_id, user_id, email, display_name, role,
+                        agreement_id, email, display_name, role,
                         ownership_pct, royalty_pct, attribution_name,
                         public_attribution, acceptance_token, acceptance_expires_at, status
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'invited'
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'invited'
                     )
                 """, (
                     agreement_id,
-                    p.get('user_id', ''),
                     p['email'],
                     p.get('display_name', ''),
                     p.get('role', 'co-author'),
@@ -2416,9 +2415,11 @@ def accept_agreement(agreement_id):
             cur.execute("""
                 UPDATE public.agreement_participants
                 SET status = 'accepted', accepted_at = NOW(),
-                    acceptance_ip = %s
+                    acceptance_ip = %s,
+                    acceptance_token = NULL,
+                    user_id = %s
                 WHERE id = %s
-            """, (request.remote_addr, str(part[0])))
+            """, (request.remote_addr, user_id, str(part[0])))
 
             _log_agreement_event(cur, agreement_id, 'participant_accepted', user_id, {
                 'participant_id': str(part[0])
