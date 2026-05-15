@@ -2281,16 +2281,46 @@ def create_agreement():
             for p in participants:
                 token   = secrets.token_urlsafe(32)
                 expires = datetime.now(timezone.utc) + timedelta(days=14)
+
+                # Resolve participant user_id
+                p_user_id = p.get('user_id')
+
+                if not p_user_id:
+                    try:
+                        cur.execute(
+                            "SELECT id FROM auth.users WHERE email = %s LIMIT 1",
+                            (p['email'],)
+                        )
+                        found_user = cur.fetchone()
+
+                        if found_user:
+                            p_user_id = str(found_user[0])
+                        else:
+                            p_user_id = creator_id
+
+                    except Exception:
+                        p_user_id = creator_id
+
                 cur.execute("""
                     INSERT INTO public.agreement_participants (
-                        agreement_id, email, display_name, role,
-                        ownership_pct, royalty_pct, attribution_name,
-                        public_attribution, acceptance_token, acceptance_expires_at, status
+                        agreement_id,
+                        user_id,
+                        email,
+                        display_name,
+                        role,
+                        ownership_pct,
+                        royalty_pct,
+                        attribution_name,
+                        public_attribution,
+                        acceptance_token,
+                        acceptance_expires_at,
+                        status
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'invited'
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'invited'
                     )
                 """, (
                     agreement_id,
+                    p_user_id,
                     p['email'],
                     p.get('display_name', ''),
                     p.get('role', 'co-author'),
