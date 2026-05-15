@@ -2317,7 +2317,7 @@ def create_agreement():
         }), 201
 
     except Exception as e:
-        logger.exception('create_agreement error')
+        log_error('agreement', 'create_failed', error=str(e))
         return jsonify({'error': str(e)}), 500
 
 
@@ -2482,7 +2482,7 @@ def accept_agreement(agreement_id):
                 'agreement_activated': activated
             })
     except Exception as e:
-        logger.exception('accept_agreement error')
+        log_error('agreement', 'accept_failed', error=str(e))
         return jsonify({'error': str(e)}), 500
 
 
@@ -2846,5 +2846,5 @@ def generate_agreement_pdf(agreement_id):
         )
 
     except Exception as e:
-        logger.exception('generate_agreement_pdf error')
+        log_error('agreement', 'pdf_failed', error=str(e))
         return jsonify({'error': str(e)}), 500
