@@ -2423,33 +2423,35 @@ def accept_agreement(agreement_id):
     claims, err = _require_auth(request)
     if err: return err
     user_id = claims.get("sub", "")
-    data    = request.get_json(force=True) or {}
-    token   = data.get('token')
+    data = request.get_json(force=True) or {}
 
     try:
         with db_cursor() as (conn, cur):
+            # Authenticated lookup — no token required, identity from JWT
             cur.execute("""
                 SELECT id, status, acceptance_expires_at
                 FROM public.agreement_participants
-                WHERE agreement_id = %s AND acceptance_token = %s
-            """, (agreement_id, token))
+                WHERE agreement_id = %s AND user_id = %s
+            """, (agreement_id, user_id))
             part = cur.fetchone()
             if not part:
-                return jsonify({'error': 'invalid token'}), 403
+                return jsonify({'error': 'not a participant in this agreement'}), 403
+            if part[1] == 'accepted':
+                return jsonify({'status': 'accepted', 'agreement_activated': False,
+                                'message': 'already accepted'}), 200
             if part[1] != 'invited':
-                return jsonify({'error': f'already {part[1]}'}), 400
+                return jsonify({'error': f'cannot accept from status: {part[1]}'}), 400
             if part[2] and part[2] < datetime.now(timezone.utc):
                 return jsonify({'error': 'invitation expired'}), 410
 
-            # Mark accepted
+            # Mark accepted — identity already correct, clear token, record IP
             cur.execute("""
                 UPDATE public.agreement_participants
                 SET status = 'accepted', accepted_at = NOW(),
                     acceptance_ip = %s,
-                    acceptance_token = NULL,
-                    user_id = %s
+                    acceptance_token = NULL
                 WHERE id = %s
-            """, (request.remote_addr, user_id, str(part[0])))
+            """, (request.remote_addr, str(part[0])))
 
             _log_agreement_event(cur, agreement_id, 'participant_accepted', user_id, {
                 'participant_id': str(part[0])
@@ -2878,3 +2880,536 @@ def generate_agreement_pdf(agreement_id):
     except Exception as e:
         log_error('agreement', 'pdf_failed', error=str(e))
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/agreements/<agreement_id>/pdf', methods=['GET'])
+def get_agreement_pdf(agreement_id):
+    """Retrieve PDF by regenerating deterministically from current DB state."""
+    claims, err = _require_auth(request)
+    if err: return err
+    actor_id = claims.get("sub", "")
+
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT a.id, a.submission_id, a.status, a.created_by,
+                       a.created_at, a.activated_at, a.agreement_hash,
+                       a.template_version, a.commercial_use, a.derivative_works,
+                       a.sublicensing, a.ai_training_permitted, a.attribution_required,
+                       a.dispute_resolution, a.governing_jurisdiction,
+                       a.minimum_publication_threshold, a.canonicalization_version
+                FROM public.coownership_agreements a
+                WHERE a.id = %s
+            """, (agreement_id,))
+            agr = cur.fetchone()
+            if not agr:
+                return jsonify({'error': 'agreement not found'}), 404
+            if agr[2] != 'active':
+                return jsonify({'error': 'PDF only available for active agreements'}), 400
+
+            cur.execute("""
+                SELECT 1 FROM public.agreement_participants
+                WHERE agreement_id = %s AND user_id = %s
+                UNION
+                SELECT 1 FROM public.coownership_agreements
+                WHERE id = %s AND created_by = %s
+                LIMIT 1
+            """, (agreement_id, actor_id, agreement_id, actor_id))
+            if not cur.fetchone():
+                return jsonify({'error': 'access denied'}), 403
+
+            cur.execute("""
+                SELECT COALESCE(attribution_name, display_name, 'Participant') AS name,
+                       role, ownership_pct,
+                       COALESCE(royalty_pct, ownership_pct) AS royalty_pct,
+                       accepted_at, status
+                FROM public.agreement_participants
+                WHERE agreement_id = %s ORDER BY ownership_pct DESC
+            """, (agreement_id,))
+            participants = cur.fetchall()
+
+        from reportlab.pdfgen import canvas as rl_canvas
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.lib import colors
+        from flask import Response
+        import io, hashlib as _hl
+
+        buf = io.BytesIO()
+        W, H = A4
+        c = rl_canvas.Canvas(buf, pagesize=A4)
+
+        PAGE_BOTTOM = 25 * mm
+        def _check_page(y, needed=12):
+            if y < PAGE_BOTTOM + needed * mm:
+                c.showPage()
+                c.setFont('Helvetica-Bold', 9)
+                c.setFillColor(colors.HexColor('#888888'))
+                c.drawString(20*mm, H - 12*mm, f'Agreement {agreement_id[:8]}... (continued)')
+                return H - 22*mm
+            return y
+
+        def _hline(y):
+            c.setStrokeColor(colors.HexColor('#DDDDDD'))
+            c.line(20*mm, y, W - 20*mm, y)
+
+        def _section(title, y):
+            y = _check_page(y, 20)
+            c.setFont('Helvetica-Bold', 9)
+            c.setFillColor(colors.HexColor('#1A1A2E'))
+            c.drawString(20*mm, y, title)
+            _hline(y - 2*mm)
+            return y - 9*mm
+
+        def _field(label, value, y):
+            y = _check_page(y, 8)
+            c.setFont('Helvetica-Bold', 7.5)
+            c.setFillColor(colors.HexColor('#666666'))
+            c.drawString(22*mm, y, f'{label}:')
+            c.setFont('Helvetica', 7.5)
+            c.setFillColor(colors.black)
+            c.drawString(72*mm, y, str(value) if value is not None else '—')
+            return y - 6*mm
+
+        c.setFillColor(colors.HexColor('#1A1A2E'))
+        c.rect(0, H - 28*mm, W, 28*mm, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont('Helvetica-Bold', 15)
+        c.drawString(20*mm, H - 13*mm, 'SeekReap Co-Ownership Agreement')
+        c.setFont('Helvetica', 8)
+        c.drawString(20*mm, H - 20*mm,
+            f'Template: {agr[7]}  |  Canon: {CANON_VERSION}  |  Status: {agr[2].upper()}')
+
+        y = H - 36*mm
+        y = _section('AGREEMENT IDENTITY', y)
+        y = _field('Agreement ID',  str(agr[0]), y)
+        y = _field('Submission ID', str(agr[1]), y)
+        y = _field('Created by',    agr[3], y)
+        y = _field('Created at',    str(agr[4])[:19] if agr[4] else '—', y)
+        y = _field('Activated at',  str(agr[5])[:19] if agr[5] else '—', y)
+        y -= 3*mm
+
+        y = _section('RIGHTS & GOVERNANCE', y)
+        y = _field('Commercial use',       'Yes' if agr[8]  else 'No', y)
+        y = _field('Derivative works',     'Yes' if agr[9]  else 'No', y)
+        y = _field('Sublicensing',         'Yes' if agr[10] else 'No', y)
+        y = _field('AI training',          'Yes' if agr[11] else 'No', y)
+        y = _field('Attribution required', 'Yes' if agr[12] else 'No', y)
+        y = _field('Dispute resolution',   agr[13] or '—', y)
+        y = _field('Jurisdiction',         agr[14] or 'Not specified', y)
+        y = _field('Pub. threshold',       f"{agr[15]}%" if agr[15] else '50%', y)
+        y -= 3*mm
+
+        y = _section('PARTICIPANTS & OWNERSHIP', y)
+        for p in participants:
+            y = _check_page(y, 16)
+            c.setFont('Helvetica-Bold', 8)
+            c.setFillColor(colors.black)
+            c.drawString(22*mm, y, str(p[0]))
+            c.setFont('Helvetica', 7.5)
+            c.setFillColor(colors.HexColor('#555555'))
+            c.drawString(80*mm, y,
+                f'{p[1]}  |  {float(p[2]):.1f}% ownership  |  {float(p[3]):.1f}% royalty')
+            y -= 5*mm
+            c.setFont('Helvetica', 7)
+            accepted_str = str(p[4])[:10] if p[4] else 'pending'
+            c.drawString(26*mm, y, f'Status: {p[5]}  |  Accepted: {accepted_str}')
+            y -= 7*mm
+        y -= 3*mm
+
+        y = _section('CRYPTOGRAPHIC INTEGRITY', y)
+        agreement_hash = agr[6] or '—'
+        y = _field('Agreement hash', agreement_hash, y)
+        y = _field('Hash algorithm', 'SHA-256', y)
+        y = _field('Canon version',  CANON_VERSION, y)
+        c.setFont('Helvetica', 6.5)
+        c.setFillColor(colors.HexColor('#888888'))
+        c.drawString(22*mm, y,
+            'agreement_hash is the authoritative legal identity. '
+            'The PDF is a rendering of the canonical snapshot.')
+        y -= 8*mm
+
+        c.setFillColor(colors.HexColor('#F5F5F5'))
+        c.rect(0, 0, W, 22*mm, fill=1, stroke=0)
+        c.setFillColor(colors.HexColor('#888888'))
+        c.setFont('Helvetica', 6.5)
+        c.drawString(20*mm, 15*mm,
+            'Generated from structured data by SeekReap. '
+            'PDF is a representation only — agreement_hash is the canonical proof.')
+        verify_url = f'{VERIFY_BASE_URL}/verify/agreement/{agreement_id}'
+        c.drawString(20*mm, 10*mm, f'Verify: {verify_url}')
+        c.drawString(20*mm, 5*mm, f'Agreement hash: {agreement_hash}')
+        c.save()
+
+        buf.seek(0)
+        pdf_bytes = buf.read()
+        pdf_hash = _hl.sha256(pdf_bytes).hexdigest()
+
+        return Response(
+            pdf_bytes,
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition':
+                    f'attachment; filename=seekreap-agreement-{agreement_id[:8]}.pdf',
+                'X-Agreement-Hash': agreement_hash,
+                'X-PDF-Hash':       pdf_hash,
+                'X-Canon-Version':  CANON_VERSION,
+                'X-Legal-Note':
+                    'agreement_hash is the canonical legal identity, not pdf_hash'
+            }
+        )
+
+    except Exception as e:
+        log_error('agreement', 'pdf_get_failed', error=str(e))
+        return jsonify({'error': str(e)}), 500
+
+
+
+# ══════════════════════════════════════════════════════════════════
+# RIGHTS ENGINE v1
+# Internal policy evaluator — internal-first, externally callable later.
+#
+# Core contract:
+#   evaluate_rights(agreement_id, actor_id, action_id, context) -> RightsDecision
+#
+# Decision sources (machine-readable):
+#   agreement_inactive        — agreement not in 'active' state
+#   actor_not_participant     — actor has no role in agreement
+#   missing_permission        — rights flag explicitly false
+#   unanimous_required        — action needs all participants; not all active
+#   threshold_not_met         — weighted ownership below required threshold
+#   permission_granted        — explicit rights flag true
+#   owner_governance_right    — creator exercising governance action
+#   platform_default_allow    — no explicit restriction found
+# ══════════════════════════════════════════════════════════════════
+
+RIGHTS_ENGINE_VERSION = 'v1'
+
+def _build_rights_snapshot(cur, agreement_id: str) -> dict:
+    """Build canonical rights state from agreement + participants."""
+    cur.execute("""
+        SELECT
+            a.id, a.status, a.created_by, a.agreement_hash,
+            a.commercial_use, a.derivative_works, a.sublicensing,
+            a.ai_training_permitted, a.attribution_required,
+            a.publication_requires_all, a.minimum_publication_threshold,
+            a.dispute_resolution, a.governing_jurisdiction,
+            a.template_version, a.activated_at,
+            a.canonicalization_version
+        FROM public.coownership_agreements a
+        WHERE a.id = %s
+    """, (agreement_id,))
+    agr = cur.fetchone()
+    if not agr:
+        return None
+
+    cur.execute("""
+        SELECT user_id, role, ownership_pct, royalty_pct,
+               attribution_name, status, accepted_at
+        FROM public.agreement_participants
+        WHERE agreement_id = %s
+        ORDER BY ownership_pct DESC
+    """, (agreement_id,))
+    participants = cur.fetchall()
+
+    return {
+        'agreement_id':              str(agr[0]),
+        'status':                    agr[1],
+        'created_by':                str(agr[2]),
+        'agreement_hash':            agr[3],
+        'rights': {
+            'commercial_use':                agr[4],
+            'derivative_works':              agr[5],
+            'sublicensing':                  agr[6],
+            'ai_training_permitted':         agr[7],
+            'attribution_required':          agr[8],
+            'publication_requires_all':      agr[9],
+            'minimum_publication_threshold': float(agr[10]) if agr[10] else 50.0,
+            'dispute_resolution':            agr[11],
+            'governing_jurisdiction':        agr[12],
+        },
+        'template_version':          agr[13],
+        'activated_at':              agr[14].isoformat() if agr[14] else None,
+        'canonicalization_version':  agr[15] or CANON_VERSION,
+        'participants': [{
+            'user_id':          str(p[0]) if p[0] else None,
+            'role':             p[1],
+            'ownership_pct':    float(p[2]),
+            'royalty_pct':      float(p[3]) if p[3] else float(p[2]),
+            'attribution_name': p[4],
+            'status':           p[5],
+            'accepted_at':      p[6].isoformat() if p[6] else None,
+        } for p in participants],
+        'engine_version': RIGHTS_ENGINE_VERSION,
+    }
+
+
+def _store_rights_snapshot(cur, agreement_id: str, state: dict,
+                            triggered_by: str = 'evaluation') -> str:
+    """Hash and store a rights snapshot. Returns snapshot_id."""
+    import uuid as _uuid
+    state_json = _canonical_json(state)
+    snap_hash  = _sha256(state_json)
+
+    # Check if identical snapshot already exists
+    cur.execute(
+        "SELECT id FROM public.rights_snapshots WHERE snapshot_hash = %s",
+        (snap_hash,)
+    )
+    existing = cur.fetchone()
+    if existing:
+        return str(existing[0])
+
+    snap_id = str(_uuid.uuid4())
+    cur.execute("""
+        INSERT INTO public.rights_snapshots
+            (id, agreement_id, snapshot_hash, rights_state,
+             canon_version, state_version, triggered_by)
+        VALUES (%s, %s, %s, %s::jsonb, %s, 1, %s)
+    """, (snap_id, agreement_id, snap_hash, state_json,
+          CANON_VERSION, triggered_by))
+    return snap_id
+
+
+def _log_rights_evaluation(cur, agreement_id: str, action_id: str,
+                            actor_id: str, allowed: bool, reason: str,
+                            decision_source: str, context: dict = None):
+    """Append immutable evaluation record."""
+    cur.execute("""
+        INSERT INTO public.rights_evaluations
+            (agreement_id, action_id, actor_id, allowed,
+             reason, decision_source, evaluation_version, context)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+    """, (agreement_id, action_id, actor_id, allowed,
+          reason, decision_source, RIGHTS_ENGINE_VERSION,
+          json.dumps(context or {})))
+
+
+def evaluate_rights(agreement_id: str, actor_id: str,
+                    action_id: str, context: dict = None,
+                    log: bool = True) -> dict:
+    """
+    Deterministic rights evaluator — the core engine.
+
+    Returns a stable decision object:
+    {
+        allowed:          bool,
+        reason:           str,
+        decision_source:  str,
+        action_id:        str,
+        agreement_id:     str,
+        actor_id:         str,
+        snapshot_id:      str | None,
+        evaluated_at:     str,
+        engine_version:   str,
+        ownership_pct:    float | None,
+        attribution_required: bool,
+        royalty_pct:      float | None,
+    }
+    """
+    from datetime import datetime, timezone as _tz
+
+    def _deny(reason, source, state=None, snap_id=None):
+        return {
+            'allowed':              False,
+            'reason':               reason,
+            'decision_source':      source,
+            'action_id':            action_id,
+            'agreement_id':         agreement_id,
+            'actor_id':             actor_id,
+            'snapshot_id':          snap_id,
+            'evaluated_at':         datetime.now(_tz.utc).isoformat(),
+            'engine_version':       RIGHTS_ENGINE_VERSION,
+            'ownership_pct':        None,
+            'attribution_required': True,
+            'royalty_pct':          None,
+        }
+
+    def _allow(reason, source, state, actor_part, snap_id):
+        return {
+            'allowed':              True,
+            'reason':               reason,
+            'decision_source':      source,
+            'action_id':            action_id,
+            'agreement_id':         agreement_id,
+            'actor_id':             actor_id,
+            'snapshot_id':          snap_id,
+            'evaluated_at':         datetime.now(_tz.utc).isoformat(),
+            'engine_version':       RIGHTS_ENGINE_VERSION,
+            'ownership_pct':        actor_part['ownership_pct'] if actor_part else None,
+            'attribution_required': state['rights']['attribution_required'],
+            'royalty_pct':          actor_part['royalty_pct'] if actor_part else None,
+        }
+
+    try:
+        with db_cursor() as (conn, cur):
+            # 1. Load action definition
+            cur.execute(
+                "SELECT requires_unanimous, requires_all_active, category "
+                "FROM public.rights_actions WHERE id = %s",
+                (action_id,)
+            )
+            action_def = cur.fetchone()
+            if not action_def:
+                return _deny(f"Unknown action '{action_id}'", 'unknown_action')
+            requires_unanimous, requires_all_active, category = action_def
+
+            # 2. Build rights snapshot
+            state = _build_rights_snapshot(cur, agreement_id)
+            if not state:
+                return _deny('Agreement not found', 'agreement_not_found')
+
+            # 3. Store snapshot
+            snap_id = _store_rights_snapshot(cur, agreement_id, state, 'evaluation')
+
+            # 4. Agreement must be active
+            if state['status'] != 'active':
+                result = _deny(
+                    f"Agreement is '{state['status']}', not active",
+                    'agreement_inactive', state, snap_id
+                )
+                if log:
+                    _log_rights_evaluation(cur, agreement_id, action_id,
+                                           actor_id, False, result['reason'],
+                                           result['decision_source'], context)
+                    conn.commit()
+                return result
+
+            # 5. Find actor's participant record
+            actor_part = next(
+                (p for p in state['participants'] if p['user_id'] == actor_id),
+                None
+            )
+            is_creator = (actor_id == state['created_by'])
+
+            if not actor_part and not is_creator:
+                result = _deny(
+                    'Actor is not a participant in this agreement',
+                    'actor_not_participant', state, snap_id
+                )
+                if log:
+                    _log_rights_evaluation(cur, agreement_id, action_id,
+                                           actor_id, False, result['reason'],
+                                           result['decision_source'], context)
+                    conn.commit()
+                return result
+
+            # 6. Unanimous actions — all participants must be accepted
+            if requires_unanimous:
+                non_accepted = [
+                    p for p in state['participants']
+                    if p['status'] != 'accepted'
+                ]
+                if non_accepted:
+                    result = _deny(
+                        f"Action '{action_id}' requires unanimous acceptance; "
+                        f"{len(non_accepted)} participant(s) not yet accepted",
+                        'unanimous_required', state, snap_id
+                    )
+                    if log:
+                        _log_rights_evaluation(cur, agreement_id, action_id,
+                                               actor_id, False, result['reason'],
+                                               result['decision_source'], context)
+                        conn.commit()
+                    return result
+
+            rights = state['rights']
+
+            # 7. Action-specific policy resolution
+            POLICY_MAP = {
+                'publish':            (True,                              'platform_default_allow'),
+                'commercial_publish': (rights['commercial_use'],          'missing_permission'),
+                'distribute':         (rights['commercial_use'],          'missing_permission'),
+                'create_derivative':  (rights['derivative_works'],        'missing_permission'),
+                'sublicense':         (rights['sublicensing'],            'missing_permission'),
+                'ai_train':           (rights['ai_training_permitted'],   'missing_permission'),
+                'ai_embed':           (rights['ai_training_permitted'],   'missing_permission'),
+                'transfer_ownership': (True,                              'owner_governance_right'),
+                'revoke_agreement':   (True,                              'owner_governance_right'),
+                'amend_rights':       (True,                              'owner_governance_right'),
+                'freeze_asset':       (True,                              'owner_governance_right'),
+                'generate_pdf':       (True,                              'permission_granted'),
+                'verify_chain':       (True,                              'permission_granted'),
+            }
+
+            if action_id in POLICY_MAP:
+                permitted, deny_source = POLICY_MAP[action_id]
+                if not permitted:
+                    result = _deny(
+                        f"Action '{action_id}' is not permitted under this agreement",
+                        deny_source, state, snap_id
+                    )
+                    if log:
+                        _log_rights_evaluation(cur, agreement_id, action_id,
+                                               actor_id, False, result['reason'],
+                                               result['decision_source'], context)
+                        conn.commit()
+                    return result
+
+            # 8. Threshold check for publication actions
+            if category == 'publication':
+                threshold = rights['minimum_publication_threshold']
+                if rights['publication_requires_all']:
+                    accepted_pct = sum(
+                        p['ownership_pct'] for p in state['participants']
+                        if p['status'] == 'accepted'
+                    )
+                    if accepted_pct < 100.0:
+                        result = _deny(
+                            f"Publication requires all participants; "
+                            f"only {accepted_pct:.1f}% ownership accepted",
+                            'threshold_not_met', state, snap_id
+                        )
+                        if log:
+                            _log_rights_evaluation(cur, agreement_id, action_id,
+                                                   actor_id, False, result['reason'],
+                                                   result['decision_source'], context)
+                            conn.commit()
+                        return result
+                else:
+                    accepted_pct = sum(
+                        p['ownership_pct'] for p in state['participants']
+                        if p['status'] == 'accepted'
+                    )
+                    if accepted_pct < threshold:
+                        result = _deny(
+                            f"Publication threshold not met: "
+                            f"{accepted_pct:.1f}% accepted, {threshold:.1f}% required",
+                            'threshold_not_met', state, snap_id
+                        )
+                        if log:
+                            _log_rights_evaluation(cur, agreement_id, action_id,
+                                                   actor_id, False, result['reason'],
+                                                   result['decision_source'], context)
+                            conn.commit()
+                        return result
+
+            # 9. Allowed
+            result = _allow(
+                f"Action '{action_id}' permitted under agreement rights",
+                'permission_granted', state, actor_part, snap_id
+            )
+            if log:
+                _log_rights_evaluation(cur, agreement_id, action_id,
+                                       actor_id, True, result['reason'],
+                                       result['decision_source'], context)
+                conn.commit()
+            return result
+
+    except Exception as e:
+        log_error('rights_engine', 'evaluate_failed',
+                  agreement_id=agreement_id, action_id=action_id,
+                  actor_id=actor_id, error=str(e))
+        return {
+            'allowed':         False,
+            'reason':          f'Evaluation error: {str(e)}',
+            'decision_source': 'engine_error',
+            'action_id':       action_id,
+            'agreement_id':    agreement_id,
+            'actor_id':        actor_id,
+            'snapshot_id':     None,
+            'evaluated_at':    __import__('datetime').datetime.utcnow().isoformat(),
+            'engine_version':  RIGHTS_ENGINE_VERSION,
+            'ownership_pct':   None,
+            'attribution_required': True,
+            'royalty_pct':     None,
+        }
