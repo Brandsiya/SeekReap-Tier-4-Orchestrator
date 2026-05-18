@@ -3293,7 +3293,38 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                     conn.commit()
                 return result
 
-            # 5. Find actor's participant record
+            # 5. Action scope — public actions bypass participant checks
+            ACTION_SCOPES = {
+                'publish':            'participant',
+                'commercial_publish': 'participant',
+                'distribute':         'participant',
+                'create_derivative':  'participant',
+                'sublicense':         'participant',
+                'ai_train':           'participant',
+                'ai_embed':           'participant',
+                'transfer_ownership': 'participant',
+                'revoke_agreement':   'participant',
+                'amend_rights':       'participant',
+                'freeze_asset':       'participant',
+                'generate_pdf':       'participant',
+                'verify_chain':       'public',
+            }
+            action_scope = ACTION_SCOPES.get(action_id, 'participant')
+
+            if action_scope == 'public':
+                result = _allow(
+                    f"Public action '{action_id}' permitted without participant check",
+                    'public_access', state, None, snap_id,
+                    policy_source='public_access'
+                )
+                if log:
+                    _log_rights_evaluation(cur, agreement_id, action_id,
+                                           actor_id, True, result['reason'],
+                                           result['decision_source'], context)
+                    conn.commit()
+                return result
+
+            # 5b. Find actor's participant record (participant-scoped actions only)
             actor_part = next(
                 (p for p in state['participants'] if p['user_id'] == actor_id),
                 None
