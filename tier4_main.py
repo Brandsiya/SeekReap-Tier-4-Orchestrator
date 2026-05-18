@@ -2425,6 +2425,16 @@ def accept_agreement(agreement_id):
     user_id = claims.get("sub", "")
     data = request.get_json(force=True) or {}
 
+
+    # Rights Engine — log acceptance attempt (log-only, never blocks).
+    # Token is the authorization mechanism; participant check logs expected denial
+    # for new participants until they accept and become verified participants.
+    try:
+        evaluate_rights(agreement_id, user_id, 'accept_invitation',
+                        context={'source': 'accept_route'}, log=True)
+    except Exception as _re:
+        log_error('rights_engine', 'accept_eval_failed', error=str(_re))
+
     try:
         with db_cursor() as (conn, cur):
             # Authenticated lookup — no token required, identity from JWT
@@ -3308,6 +3318,7 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                 'freeze_asset':       'participant',
                 'generate_pdf':       'participant',
                 'verify_chain':       'public',
+                'accept_invitation':   'participant',
             }
             action_scope = ACTION_SCOPES.get(action_id, 'participant')
 
@@ -3379,6 +3390,7 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                 'freeze_asset':       (True,                              'owner_governance_right'),
                 'generate_pdf':       (True,                              'permission_granted'),
                 'verify_chain':       (True,                              'permission_granted'),
+                'accept_invitation':   (True,                              'permission_granted'),
             }
 
             if action_id in POLICY_MAP:
