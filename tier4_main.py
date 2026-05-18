@@ -2679,6 +2679,16 @@ def generate_agreement_pdf(agreement_id):
     if err: return err
     actor_id = claims.get("sub", "")
 
+    # Rights Engine gate — evaluate before proceeding
+    rights = evaluate_rights(agreement_id, actor_id, 'generate_pdf',
+                             context={'source': 'api'})
+    if not rights['allowed']:
+        return jsonify({
+            'error':           'Rights check failed',
+            'reason':          rights['reason'],
+            'decision_source': rights['decision_source'],
+        }), 403
+
     try:
         with db_cursor() as (conn, cur):
             cur.execute("""
