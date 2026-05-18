@@ -3112,6 +3112,68 @@ def get_agreement_pdf(agreement_id):
 # ══════════════════════════════════════════════════════════════════
 
 RIGHTS_ENGINE_VERSION = 'v1'
+POLICY_REGISTRY_VERSION = 'v1'
+
+# ══════════════════════════════════════════════════════════════════
+# POLICY REGISTRY v1 — FROZEN
+# Changes require incrementing POLICY_REGISTRY_VERSION.
+# ══════════════════════════════════════════════════════════════════
+
+# Action scope classification
+# participant: requires verified agreement membership
+# public:      no membership required (cryptographic/observability actions)
+# system:      reserved for internal workers, cron, marketplace automation
+RIGHTS_ACTION_SCOPES = {
+    'publish':            'participant',
+    'commercial_publish': 'participant',
+    'distribute':         'participant',
+    'create_derivative':  'participant',
+    'sublicense':         'participant',
+    'ai_train':           'participant',
+    'ai_embed':           'participant',
+    'transfer_ownership': 'participant',
+    'revoke_agreement':   'participant',
+    'amend_rights':       'participant',
+    'freeze_asset':       'participant',
+    'generate_pdf':       'participant',
+    'accept_invitation':  'participant',
+    'verify_chain':       'public',
+}
+
+# Policy map: action_id -> (permitted: bool, deny_decision_source: str)
+# permitted=True means the action is allowed IF the actor passes all other checks.
+# deny_decision_source is used when permitted=False.
+RIGHTS_POLICY_MAP = {
+    'publish':            (True,                              'platform_default_allow'),
+    'commercial_publish': (None,                              'missing_permission'),   # resolved at runtime
+    'distribute':         (None,                              'missing_permission'),
+    'create_derivative':  (None,                              'missing_permission'),
+    'sublicense':         (None,                              'missing_permission'),
+    'ai_train':           (None,                              'missing_permission'),
+    'ai_embed':           (None,                              'missing_permission'),
+    'transfer_ownership': (True,                              'owner_governance_right'),
+    'revoke_agreement':   (True,                              'owner_governance_right'),
+    'amend_rights':       (True,                              'owner_governance_right'),
+    'freeze_asset':       (True,                              'owner_governance_right'),
+    'generate_pdf':       (True,                              'permission_granted'),
+    'accept_invitation':  (True,                              'permission_granted'),
+    'verify_chain':       (True,                              'permission_granted'),
+}
+
+# Decision source constants — machine-readable policy classification
+class DecisionSource:
+    AGREEMENT_INACTIVE      = 'agreement_inactive'
+    ACTOR_NOT_PARTICIPANT   = 'actor_not_participant'
+    MISSING_PERMISSION      = 'missing_permission'
+    UNANIMOUS_REQUIRED      = 'unanimous_required'
+    THRESHOLD_NOT_MET       = 'threshold_not_met'
+    PERMISSION_GRANTED      = 'permission_granted'
+    OWNER_GOVERNANCE_RIGHT  = 'owner_governance_right'
+    PLATFORM_DEFAULT_ALLOW  = 'platform_default_allow'
+    PUBLIC_ACCESS           = 'public_access'
+    UNKNOWN_ACTION          = 'unknown_action'
+    AGREEMENT_NOT_FOUND     = 'agreement_not_found'
+    ENGINE_ERROR            = 'engine_error'
 
 def _build_rights_snapshot(cur, agreement_id: str) -> dict:
     """Build canonical rights state from agreement + participants."""
@@ -3303,24 +3365,8 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                     conn.commit()
                 return result
 
-            # 5. Action scope — public actions bypass participant checks
-            ACTION_SCOPES = {
-                'publish':            'participant',
-                'commercial_publish': 'participant',
-                'distribute':         'participant',
-                'create_derivative':  'participant',
-                'sublicense':         'participant',
-                'ai_train':           'participant',
-                'ai_embed':           'participant',
-                'transfer_ownership': 'participant',
-                'revoke_agreement':   'participant',
-                'amend_rights':       'participant',
-                'freeze_asset':       'participant',
-                'generate_pdf':       'participant',
-                'verify_chain':       'public',
-                'accept_invitation':   'participant',
-            }
-            action_scope = ACTION_SCOPES.get(action_id, 'participant')
+            # 5. Action scope — use module-level registry
+            action_scope = RIGHTS_ACTION_SCOPES.get(action_id, 'participant')
 
             if action_scope == 'public':
                 result = _allow(
@@ -3375,26 +3421,21 @@ def evaluate_rights(agreement_id: str, actor_id: str,
 
             rights = state['rights']
 
-            # 7. Action-specific policy resolution
-            POLICY_MAP = {
-                'publish':            (True,                              'platform_default_allow'),
-                'commercial_publish': (rights['commercial_use'],          'missing_permission'),
-                'distribute':         (rights['commercial_use'],          'missing_permission'),
-                'create_derivative':  (rights['derivative_works'],        'missing_permission'),
-                'sublicense':         (rights['sublicensing'],            'missing_permission'),
-                'ai_train':           (rights['ai_training_permitted'],   'missing_permission'),
-                'ai_embed':           (rights['ai_training_permitted'],   'missing_permission'),
-                'transfer_ownership': (True,                              'owner_governance_right'),
-                'revoke_agreement':   (True,                              'owner_governance_right'),
-                'amend_rights':       (True,                              'owner_governance_right'),
-                'freeze_asset':       (True,                              'owner_governance_right'),
-                'generate_pdf':       (True,                              'permission_granted'),
-                'verify_chain':       (True,                              'permission_granted'),
-                'accept_invitation':   (True,                              'permission_granted'),
+            # 7. Action-specific policy resolution — use module-level registry
+            # Resolve None permission values from live agreement rights
+            RIGHTS_RUNTIME_RESOLUTION = {
+                'commercial_publish': rights['commercial_use'],
+                'distribute':         rights['commercial_use'],
+                'create_derivative':  rights['derivative_works'],
+                'sublicense':         rights['sublicensing'],
+                'ai_train':           rights['ai_training_permitted'],
+                'ai_embed':           rights['ai_training_permitted'],
             }
 
-            if action_id in POLICY_MAP:
-                permitted, deny_source = POLICY_MAP[action_id]
+            if action_id in RIGHTS_POLICY_MAP:
+                _static_permitted, deny_source = RIGHTS_POLICY_MAP[action_id]
+                permitted = (RIGHTS_RUNTIME_RESOLUTION.get(action_id, _static_permitted)
+                             if _static_permitted is None else _static_permitted)
                 if not permitted:
                     result = _deny(
                         f"Action '{action_id}' is not permitted under this agreement",
@@ -3446,7 +3487,7 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                         return result
 
             # 9. Allowed — preserve policy source from POLICY_MAP if available
-            _policy_source = POLICY_MAP.get(action_id, (None, 'permission_granted'))[1]
+            _policy_source = RIGHTS_POLICY_MAP.get(action_id, (None, 'permission_granted'))[1]
             result = _allow(
                 f"Action '{action_id}' permitted under agreement rights",
                 'permission_granted', state, actor_part, snap_id,
