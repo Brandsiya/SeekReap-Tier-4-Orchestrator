@@ -3171,9 +3171,90 @@ class DecisionSource:
     OWNER_GOVERNANCE_RIGHT  = 'owner_governance_right'
     PLATFORM_DEFAULT_ALLOW  = 'platform_default_allow'
     PUBLIC_ACCESS           = 'public_access'
+    SYSTEM_ACCESS           = 'system_access'
+    SYSTEM_IDENTITY_INVALID = 'system_identity_invalid'
     UNKNOWN_ACTION          = 'unknown_action'
     AGREEMENT_NOT_FOUND     = 'agreement_not_found'
     ENGINE_ERROR            = 'engine_error'
+
+# ══════════════════════════════════════════════════════════════════
+# SYSTEM ACTOR IDENTITY MODEL v1
+# System actors are trusted internal services, not human participants.
+# They bypass participant membership checks but require identity validation.
+# Each actor has a canonical UUID for audit trail consistency.
+# ══════════════════════════════════════════════════════════════════
+
+SYSTEM_ACTOR_REGISTRY = {
+    # actor_id (UUID)                        : service_name
+    'ffffffff-0000-0000-0000-000000000001': 'royalty_engine',
+    'ffffffff-0000-0000-0000-000000000002': 'nft_minter',
+    'ffffffff-0000-0000-0000-000000000003': 'marketplace_worker',
+    'ffffffff-0000-0000-0000-000000000004': 'escrow_processor',
+    'ffffffff-0000-0000-0000-000000000005': 'compliance_automation',
+    'ffffffff-0000-0000-0000-000000000006': 'fraud_lock_service',
+    'ffffffff-0000-0000-0000-000000000007': 'moderation_worker',
+    'ffffffff-0000-0000-0000-000000000008': 'cron_scheduler',
+}
+
+def is_system_actor(actor_id: str) -> bool:
+    """Return True if actor_id belongs to a trusted system service."""
+    return str(actor_id) in SYSTEM_ACTOR_REGISTRY
+
+def get_system_actor_name(actor_id: str) -> str:
+    """Return the service name for a system actor, or 'unknown_system'."""
+    return SYSTEM_ACTOR_REGISTRY.get(str(actor_id), 'unknown_system')
+
+# System-scoped actions — only trusted internal services may invoke these
+RIGHTS_ACTION_SCOPES.update({
+    'mint_nft':              'system',
+    'distribute_royalty':    'system',
+    'escrow_release':        'system',
+    'compliance_freeze':     'system',
+    'fraud_lock':            'system',
+    'moderation_override':   'system',
+    'cron_snapshot':         'system',
+})
+
+# Add system actions to policy registry
+RIGHTS_POLICY_MAP.update({
+    'mint_nft':              (True, 'system_access'),
+    'distribute_royalty':    (True, 'system_access'),
+    'escrow_release':        (True, 'system_access'),
+    'compliance_freeze':     (True, 'system_access'),
+    'fraud_lock':            (True, 'system_access'),
+    'moderation_override':   (True, 'system_access'),
+    'cron_snapshot':         (True, 'system_access'),
+})
+
+# Add system actions to DB registry on startup
+def _ensure_system_actions():
+    """Register system actions in rights_actions table if not present."""
+    system_actions = [
+        ('mint_nft',            'system', 'Mint an NFT from a rights snapshot',           False),
+        ('distribute_royalty',  'system', 'Execute royalty distribution event',            False),
+        ('escrow_release',      'system', 'Release escrowed funds to participants',        False),
+        ('compliance_freeze',   'system', 'Freeze asset for compliance review',            False),
+        ('fraud_lock',          'system', 'Lock asset due to fraud detection',             False),
+        ('moderation_override', 'system', 'Apply moderation action to asset',             False),
+        ('cron_snapshot',       'system', 'Generate scheduled rights snapshot',            False),
+    ]
+    try:
+        with db_cursor() as (conn, cur):
+            for action_id, category, description, requires_unanimous in system_actions:
+                cur.execute("""
+                    INSERT INTO public.rights_actions
+                        (id, category, description, requires_unanimous)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING
+                """, (action_id, category, description, requires_unanimous))
+            conn.commit()
+            log_info('rights_engine', 'system_actions_registered',
+                     count=len(system_actions))
+    except Exception as e:
+        log_warn('rights_engine', 'system_actions_registration_failed', error=str(e))
+
+_ensure_system_actions()
+
 
 def _build_rights_snapshot(cur, agreement_id: str) -> dict:
     """Build canonical rights state from agreement + participants."""
@@ -3381,7 +3462,37 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                     conn.commit()
                 return result
 
-            # 5b. Find actor's participant record (participant-scoped actions only)
+            # 5b. System scope — trusted internal services bypass participant checks
+            if action_scope == 'system':
+                if is_system_actor(actor_id):
+                    service_name = get_system_actor_name(actor_id)
+                    result = _allow(
+                        f"System action '{action_id}' executed by '{service_name}'",
+                        'system_access', state, None, snap_id,
+                        policy_source='system_access'
+                    )
+                    if log:
+                        _log_rights_evaluation(cur, agreement_id, action_id,
+                                               actor_id, True, result['reason'],
+                                               result['decision_source'],
+                                               {**(context or {}),
+                                                'service': service_name})
+                        conn.commit()
+                    return result
+                else:
+                    result = _deny(
+                        f"System action '{action_id}' rejected: "
+                        f"actor '{actor_id}' is not a trusted system service",
+                        'system_identity_invalid', state, snap_id
+                    )
+                    if log:
+                        _log_rights_evaluation(cur, agreement_id, action_id,
+                                               actor_id, False, result['reason'],
+                                               result['decision_source'], context)
+                        conn.commit()
+                    return result
+
+            # 5c. Find actor's participant record (participant-scoped actions only)
             actor_part = next(
                 (p for p in state['participants'] if p['user_id'] == actor_id),
                 None
