@@ -3413,33 +3413,3 @@ def evaluate_rights(agreement_id: str, actor_id: str,
             'attribution_required': True,
             'royalty_pct':     None,
         }
-
-
-@app.route('/internal/rights-test', methods=['GET'])
-def rights_engine_test():
-    """Temporary internal test endpoint — remove before production."""
-    import os
-    if os.environ.get('ENVIRONMENT') == 'production':
-        return jsonify({'error': 'disabled'}), 404
-    AGID  = '834518e9-5446-4410-adcb-cfb6e05875eb'
-    ACTOR = '1005e836-aac3-4cb9-8f7f-ec4ed28f3f08'
-    results = []
-    for action in ['publish', 'commercial_publish', 'ai_train',
-                   'sublicense', 'create_derivative', 'verify_chain']:
-        r = evaluate_rights(AGID, ACTOR, action, log=False)
-        results.append({
-            'action':          action,
-            'allowed':         r['allowed'],
-            'decision_source': r['decision_source'],
-            'reason':          r['reason'],
-        })
-    # Non-participant test
-    r = evaluate_rights(AGID, 'aaaaaaaa-0000-0000-0000-000000000000',
-                        'commercial_publish', log=False)
-    results.append({
-        'action':          'commercial_publish (non-participant)',
-        'allowed':         r['allowed'],
-        'decision_source': r['decision_source'],
-        'reason':          r['reason'],
-    })
-    return jsonify({'results': results, 'engine_version': RIGHTS_ENGINE_VERSION})
