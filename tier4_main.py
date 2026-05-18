@@ -2582,6 +2582,15 @@ def verify_agreement_chain(agreement_id):
     """Recompute and verify the entire event chain for tamper detection."""
     import hashlib, json as _json
 
+    # Rights Engine gate — log verify_chain evaluations
+    # No auth required for chain verification (public proof) but we still log
+    # anonymous evaluations using a sentinel actor_id
+    try:
+        evaluate_rights(agreement_id, 'public', 'verify_chain',
+                        context={'source': 'public_verify'}, log=True)
+    except Exception:
+        pass  # Never block chain verification due to engine error
+
     def _recompute_hash(previous_hash, event_type, event_data):
         def _clean(v):
             if isinstance(v, dict):
