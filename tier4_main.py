@@ -3234,11 +3234,11 @@ def evaluate_rights(agreement_id: str, actor_id: str,
             'royalty_pct':          None,
         }
 
-    def _allow(reason, source, state, actor_part, snap_id):
+    def _allow(reason, source, state, actor_part, snap_id, policy_source=None):
         return {
             'allowed':              True,
             'reason':               reason,
-            'decision_source':      source,
+            'decision_source':      policy_source or source,
             'action_id':            action_id,
             'agreement_id':         agreement_id,
             'actor_id':             actor_id,
@@ -3393,10 +3393,12 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                             conn.commit()
                         return result
 
-            # 9. Allowed
+            # 9. Allowed — preserve policy source from POLICY_MAP if available
+            _policy_source = POLICY_MAP.get(action_id, (None, 'permission_granted'))[1]
             result = _allow(
                 f"Action '{action_id}' permitted under agreement rights",
-                'permission_granted', state, actor_part, snap_id
+                'permission_granted', state, actor_part, snap_id,
+                policy_source=_policy_source
             )
             if log:
                 _log_rights_evaluation(cur, agreement_id, action_id,
