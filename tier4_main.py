@@ -3335,25 +3335,28 @@ def _store_rights_snapshot(cur, agreement_id: str, state: dict,
     cur.execute("""
         INSERT INTO public.rights_snapshots
             (id, agreement_id, snapshot_hash, rights_state,
-             canon_version, state_version, triggered_by)
-        VALUES (%s, %s, %s, %s::jsonb, %s, 1, %s)
+             canon_version, state_version, triggered_by, policy_registry_version)
+        VALUES (%s, %s, %s, %s::jsonb, %s, 1, %s, %s)
     """, (snap_id, agreement_id, snap_hash, state_json,
-          CANON_VERSION, triggered_by))
+          CANON_VERSION, triggered_by, POLICY_REGISTRY_VERSION))
     return snap_id
 
 
 def _log_rights_evaluation(cur, agreement_id: str, action_id: str,
                             actor_id: str, allowed: bool, reason: str,
-                            decision_source: str, context: dict = None):
+                            decision_source: str, context: dict = None,
+                            snapshot_id: str = None, action_scope: str = 'participant'):
     """Append immutable evaluation record."""
     cur.execute("""
         INSERT INTO public.rights_evaluations
             (agreement_id, action_id, actor_id, allowed,
-             reason, decision_source, evaluation_version, context)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+             reason, decision_source, evaluation_version, context,
+             snapshot_id, policy_registry_version, action_scope)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
     """, (agreement_id, action_id, actor_id, allowed,
           reason, decision_source, RIGHTS_ENGINE_VERSION,
-          json.dumps(context or {})))
+          json.dumps(context or {}),
+          snapshot_id, POLICY_REGISTRY_VERSION, action_scope))
 
 
 def evaluate_rights(agreement_id: str, actor_id: str,
@@ -3442,7 +3445,9 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                 if log:
                     _log_rights_evaluation(cur, agreement_id, action_id,
                                            actor_id, False, result['reason'],
-                                           result['decision_source'], context)
+                                           result['decision_source'], context,
+                                           snapshot_id=snap_id,
+                                           action_scope=action_scope)
                     conn.commit()
                 return result
 
@@ -3458,7 +3463,9 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                 if log:
                     _log_rights_evaluation(cur, agreement_id, action_id,
                                            actor_id, True, result['reason'],
-                                           result['decision_source'], context)
+                                           result['decision_source'], context,
+                                           snapshot_id=snap_id,
+                                           action_scope='public')
                     conn.commit()
                 return result
 
@@ -3476,7 +3483,9 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                                                actor_id, True, result['reason'],
                                                result['decision_source'],
                                                {**(context or {}),
-                                                'service': service_name})
+                                                'service': service_name},
+                                               snapshot_id=snap_id,
+                                               action_scope='system')
                         conn.commit()
                     return result
                 else:
@@ -3488,7 +3497,9 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                     if log:
                         _log_rights_evaluation(cur, agreement_id, action_id,
                                                actor_id, False, result['reason'],
-                                               result['decision_source'], context)
+                                               result['decision_source'], context,
+                                               snapshot_id=snap_id,
+                                               action_scope='system')
                         conn.commit()
                     return result
 
@@ -3507,7 +3518,9 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                 if log:
                     _log_rights_evaluation(cur, agreement_id, action_id,
                                            actor_id, False, result['reason'],
-                                           result['decision_source'], context)
+                                           result['decision_source'], context,
+                                           snapshot_id=snap_id,
+                                           action_scope=action_scope)
                     conn.commit()
                 return result
 
@@ -3526,7 +3539,9 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                     if log:
                         _log_rights_evaluation(cur, agreement_id, action_id,
                                                actor_id, False, result['reason'],
-                                               result['decision_source'], context)
+                                               result['decision_source'], context,
+                                               snapshot_id=snap_id,
+                                               action_scope=action_scope)
                         conn.commit()
                     return result
 
@@ -3555,7 +3570,9 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                     if log:
                         _log_rights_evaluation(cur, agreement_id, action_id,
                                                actor_id, False, result['reason'],
-                                               result['decision_source'], context)
+                                               result['decision_source'], context,
+                                               snapshot_id=snap_id,
+                                               action_scope=action_scope)
                         conn.commit()
                     return result
 
@@ -3576,7 +3593,9 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                         if log:
                             _log_rights_evaluation(cur, agreement_id, action_id,
                                                    actor_id, False, result['reason'],
-                                                   result['decision_source'], context)
+                                                   result['decision_source'], context,
+                                                   snapshot_id=snap_id,
+                                                   action_scope=action_scope)
                             conn.commit()
                         return result
                 else:
@@ -3593,7 +3612,9 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                         if log:
                             _log_rights_evaluation(cur, agreement_id, action_id,
                                                    actor_id, False, result['reason'],
-                                                   result['decision_source'], context)
+                                                   result['decision_source'], context,
+                                                   snapshot_id=snap_id,
+                                                   action_scope=action_scope)
                             conn.commit()
                         return result
 
@@ -3607,7 +3628,9 @@ def evaluate_rights(agreement_id: str, actor_id: str,
             if log:
                 _log_rights_evaluation(cur, agreement_id, action_id,
                                        actor_id, True, result['reason'],
-                                       result['decision_source'], context)
+                                       result['decision_source'], context,
+                                       snapshot_id=snap_id,
+                                       action_scope=action_scope)
                 conn.commit()
             return result
 
