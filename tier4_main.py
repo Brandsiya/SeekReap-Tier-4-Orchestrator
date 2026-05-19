@@ -3447,6 +3447,7 @@ def evaluate_rights(agreement_id: str, actor_id: str,
             # 3. Store snapshot
             snap_id = _store_rights_snapshot(cur, agreement_id, state, 'evaluation')
 
+            action_scope = RIGHTS_ACTION_SCOPES.get(action_id, 'participant')
             # 3b. Initialise rule trace — records every check passed/failed
             _trace = [
                 f'action_registered:{action_id}',
@@ -3474,8 +3475,6 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                 return result
             _trace.append('agreement_status_check:active')
 
-            # 5. Action scope — use module-level registry
-            action_scope = RIGHTS_ACTION_SCOPES.get(action_id, 'participant')
 
             if action_scope == 'public':
                 _trace.append('public_scope_bypass')
