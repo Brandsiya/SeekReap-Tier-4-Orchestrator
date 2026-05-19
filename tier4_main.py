@@ -3348,18 +3348,20 @@ def _store_rights_snapshot(cur, agreement_id: str, state: dict,
 def _log_rights_evaluation(cur, agreement_id: str, action_id: str,
                             actor_id: str, allowed: bool, reason: str,
                             decision_source: str, context: dict = None,
-                            snapshot_id: str = None, action_scope: str = 'participant'):
+                            snapshot_id: str = None, action_scope: str = 'participant',
+                            rule_trace: list = None):
     """Append immutable evaluation record."""
     cur.execute("""
         INSERT INTO public.rights_evaluations
             (agreement_id, action_id, actor_id, allowed,
              reason, decision_source, evaluation_version, context,
-             snapshot_id, policy_registry_version, action_scope)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+             snapshot_id, policy_registry_version, action_scope, rule_trace)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::jsonb)
     """, (agreement_id, action_id, actor_id, allowed,
           reason, decision_source, RIGHTS_ENGINE_VERSION,
           json.dumps(context or {}),
-          snapshot_id, POLICY_REGISTRY_VERSION, action_scope))
+          snapshot_id, POLICY_REGISTRY_VERSION, action_scope,
+          json.dumps(rule_trace or [])))
 
 
 def evaluate_rights(agreement_id: str, actor_id: str,
@@ -3439,36 +3441,51 @@ def evaluate_rights(agreement_id: str, actor_id: str,
             # 3. Store snapshot
             snap_id = _store_rights_snapshot(cur, agreement_id, state, 'evaluation')
 
+            # 3b. Initialise rule trace — records every check passed/failed
+            _trace = [
+                f'action_registered:{action_id}',
+                f'scope:{action_scope}',
+                f'agreement_loaded:{agreement_id}',
+                f'snapshot_stored:{snap_id}',
+            ]
+
             # 4. Agreement must be active
             if state['status'] != 'active':
+                _trace.append(f'agreement_status_check:failed:{state["status"]}')
                 result = _deny(
                     f"Agreement is '{state['status']}', not active",
                     'agreement_inactive', state, snap_id
                 )
+                result['rule_trace'] = _trace
                 if log:
                     _log_rights_evaluation(cur, agreement_id, action_id,
                                            actor_id, False, result['reason'],
                                            result['decision_source'], context,
                                            snapshot_id=snap_id,
-                                           action_scope=action_scope)
+                                           action_scope=action_scope,
+                                           rule_trace=_trace)
                     conn.commit()
                 return result
+            _trace.append('agreement_status_check:active')
 
             # 5. Action scope — use module-level registry
             action_scope = RIGHTS_ACTION_SCOPES.get(action_id, 'participant')
 
             if action_scope == 'public':
+                _trace.append('public_scope_bypass')
                 result = _allow(
                     f"Public action '{action_id}' permitted without participant check",
                     'public_access', state, None, snap_id,
                     policy_source='public_access'
                 )
+                result['rule_trace'] = _trace
                 if log:
                     _log_rights_evaluation(cur, agreement_id, action_id,
                                            actor_id, True, result['reason'],
                                            result['decision_source'], context,
                                            snapshot_id=snap_id,
-                                           action_scope='public')
+                                           action_scope='public',
+                                           rule_trace=_trace)
                     conn.commit()
                 return result
 
@@ -3476,11 +3493,13 @@ def evaluate_rights(agreement_id: str, actor_id: str,
             if action_scope == 'system':
                 if is_system_actor(actor_id):
                     service_name = get_system_actor_name(actor_id)
+                    _trace.append(f'system_identity_verified:{service_name}')
                     result = _allow(
                         f"System action '{action_id}' executed by '{service_name}'",
                         'system_access', state, None, snap_id,
                         policy_source='system_access'
                     )
+                    result['rule_trace'] = _trace
                     if log:
                         _log_rights_evaluation(cur, agreement_id, action_id,
                                                actor_id, True, result['reason'],
@@ -3488,21 +3507,25 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                                                {**(context or {}),
                                                 'service': service_name},
                                                snapshot_id=snap_id,
-                                               action_scope='system')
+                                               action_scope='system',
+                                               rule_trace=_trace)
                         conn.commit()
                     return result
                 else:
+                    _trace.append('system_identity_rejected')
                     result = _deny(
                         f"System action '{action_id}' rejected: "
                         f"actor '{actor_id}' is not a trusted system service",
                         'system_identity_invalid', state, snap_id
                     )
+                    result['rule_trace'] = _trace
                     if log:
                         _log_rights_evaluation(cur, agreement_id, action_id,
                                                actor_id, False, result['reason'],
                                                result['decision_source'], context,
                                                snapshot_id=snap_id,
-                                               action_scope='system')
+                                               action_scope='system',
+                                               rule_trace=_trace)
                         conn.commit()
                     return result
 
@@ -3514,18 +3537,22 @@ def evaluate_rights(agreement_id: str, actor_id: str,
             is_creator = (actor_id == state['created_by'])
 
             if not actor_part and not is_creator:
+                _trace.append('participant_check:failed')
                 result = _deny(
                     'Actor is not a participant in this agreement',
                     'actor_not_participant', state, snap_id
                 )
+                result['rule_trace'] = _trace
                 if log:
                     _log_rights_evaluation(cur, agreement_id, action_id,
                                            actor_id, False, result['reason'],
                                            result['decision_source'], context,
                                            snapshot_id=snap_id,
-                                           action_scope=action_scope)
+                                           action_scope=action_scope,
+                                           rule_trace=_trace)
                     conn.commit()
                 return result
+            _trace.append(f'participant_check:verified:{"creator" if is_creator else "participant"}')
 
             # 6. Unanimous actions — all participants must be accepted
             if requires_unanimous:
@@ -3534,19 +3561,23 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                     if p['status'] != 'accepted'
                 ]
                 if non_accepted:
+                    _trace.append(f'unanimous_check:failed:{len(non_accepted)}_pending')
                     result = _deny(
                         f"Action '{action_id}' requires unanimous acceptance; "
                         f"{len(non_accepted)} participant(s) not yet accepted",
                         'unanimous_required', state, snap_id
                     )
+                    result['rule_trace'] = _trace
                     if log:
                         _log_rights_evaluation(cur, agreement_id, action_id,
                                                actor_id, False, result['reason'],
                                                result['decision_source'], context,
                                                snapshot_id=snap_id,
-                                               action_scope=action_scope)
+                                               action_scope=action_scope,
+                                               rule_trace=_trace)
                         conn.commit()
                     return result
+            _trace.append('unanimous_check:passed')
 
             rights = state['rights']
 
@@ -3566,18 +3597,22 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                 permitted = (RIGHTS_RUNTIME_RESOLUTION.get(action_id, _static_permitted)
                              if _static_permitted is None else _static_permitted)
                 if not permitted:
+                    _trace.append(f'policy_check:denied:{deny_source}')
                     result = _deny(
                         f"Action '{action_id}' is not permitted under this agreement",
                         deny_source, state, snap_id
                     )
+                    result['rule_trace'] = _trace
                     if log:
                         _log_rights_evaluation(cur, agreement_id, action_id,
                                                actor_id, False, result['reason'],
                                                result['decision_source'], context,
                                                snapshot_id=snap_id,
-                                               action_scope=action_scope)
+                                               action_scope=action_scope,
+                                               rule_trace=_trace)
                         conn.commit()
                     return result
+            _trace.append(f'policy_check:passed:{_policy_source if "RIGHTS_POLICY_MAP" not in str(action_id) else "permission_granted"}')
 
             # 8. Threshold check for publication actions
             if category == 'publication':
@@ -3623,17 +3658,20 @@ def evaluate_rights(agreement_id: str, actor_id: str,
 
             # 9. Allowed — preserve policy source from POLICY_MAP if available
             _policy_source = RIGHTS_POLICY_MAP.get(action_id, (None, 'permission_granted'))[1]
+            _trace.append(f'final_decision:allowed:{_policy_source}')
             result = _allow(
                 f"Action '{action_id}' permitted under agreement rights",
                 'permission_granted', state, actor_part, snap_id,
                 policy_source=_policy_source
             )
+            result['rule_trace'] = _trace
             if log:
                 _log_rights_evaluation(cur, agreement_id, action_id,
                                        actor_id, True, result['reason'],
                                        result['decision_source'], context,
                                        snapshot_id=snap_id,
-                                       action_scope=action_scope)
+                                       action_scope=action_scope,
+                                       rule_trace=_trace)
                 conn.commit()
             return result
 
