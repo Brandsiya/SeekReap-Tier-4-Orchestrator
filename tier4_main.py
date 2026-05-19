@@ -2706,7 +2706,10 @@ def generate_agreement_pdf(agreement_id):
             'error':           'Rights check failed',
             'reason':          rights['reason'],
             'decision_source': rights['decision_source'],
+            'snapshot_id':     rights.get('snapshot_id'),
         }), 403
+    # snapshot_id available for downstream audit if needed
+    _pdf_rights_snapshot_id = rights.get('snapshot_id')
 
     try:
         with db_cursor() as (conn, cur):
