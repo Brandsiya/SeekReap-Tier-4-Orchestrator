@@ -2596,10 +2596,16 @@ def verify_agreement_chain(agreement_id):
     # No auth required for chain verification (public proof) but we still log
     # anonymous evaluations using a sentinel actor_id
     try:
-        evaluate_rights(agreement_id, '00000000-0000-0000-0000-000000000000', 'verify_chain',
-                        context={'source': 'public_verify'}, log=True)
-    except Exception:
-        log_error('rights_engine', 'verify_chain_log_failed', error=str(e) if 'e' in dir() else 'unknown')
+        _vc_result = evaluate_rights(
+            agreement_id, '00000000-0000-0000-0000-000000000000',
+            'verify_chain', context={'source': 'public_verify'},
+            log=True)
+        log_info('rights_engine', 'verify_chain_evaluated',
+                 allowed=_vc_result.get('allowed'),
+                 trace_len=len(_vc_result.get('rule_trace') or []),
+                 snap_id=_vc_result.get('snapshot_id'))
+    except Exception as _vce:
+        log_error('rights_engine', 'verify_chain_log_failed', error=str(_vce))
 
     def _recompute_hash(previous_hash, event_type, event_data):
         def _clean(v):
