@@ -3185,6 +3185,7 @@ class DecisionSource:
     UNKNOWN_ACTION          = 'unknown_action'
     AGREEMENT_NOT_FOUND     = 'agreement_not_found'
     ENGINE_ERROR            = 'engine_error'
+    DELEGATED_ACCESS        = 'delegated_access'
 
 # ══════════════════════════════════════════════════════════════════
 # SYSTEM ACTOR IDENTITY MODEL v1
@@ -3208,6 +3209,122 @@ SYSTEM_ACTOR_REGISTRY = {
 def is_system_actor(actor_id: str) -> bool:
     """Return True if actor_id belongs to a trusted system service."""
     return str(actor_id) in SYSTEM_ACTOR_REGISTRY
+
+
+# ══════════════════════════════════════════════════════════════════
+# DELEGATED AUTHORITY MODEL v1
+# Delegates are third parties authorized by a participant to act
+# on their behalf for specific actions within an agreement.
+# Enforcement chain:
+#   1. delegate has active delegation
+#   2. delegation not expired
+#   3. delegation not revoked
+#   4. grantor still authorized in agreement
+#   5. action in delegation's allowed_actions
+#   6. scope constraints satisfied
+# ══════════════════════════════════════════════════════════════════
+
+def _resolve_delegation(cur, agreement_id: str, delegate_id: str,
+                         action_id: str) -> dict:
+    """
+    Look up active delegation for delegate_id in this agreement.
+    Returns delegation row dict or None.
+    Also verifies grantor still holds participant status.
+    """
+    from datetime import datetime, timezone as _tz
+
+    cur.execute("""
+        SELECT d.id, d.grantor_id, d.delegate_id, d.delegate_name,
+               d.allowed_actions, d.allowed_actions_v2,
+               d.scope_type, d.scope_constraint,
+               d.expires_at, d.status, d.snapshot_id,
+               d.policy_registry_version, d.delegation_hash
+        FROM public.rights_delegations d
+        WHERE d.agreement_id = %s
+          AND d.delegate_id = %s
+          AND d.status = 'active'
+        ORDER BY d.granted_at DESC
+        LIMIT 1
+    """, (agreement_id, delegate_id))
+    row = cur.fetchone()
+    if not row:
+        return None
+
+    (del_id, grantor_id, delegate_id_, delegate_name,
+     allowed_actions, allowed_actions_v2,
+     scope_type, scope_constraint,
+     expires_at, status, snap_id,
+     pol_ver, del_hash) = row
+
+    # Check expiry
+    if expires_at and expires_at < datetime.now(_tz.utc):
+        return None
+
+    # Check action is in allowed_actions
+    # Support both TEXT[] and JSONB v2 format
+    action_allowed = False
+    if allowed_actions_v2:
+        # v2: [{"action": "...", "version": "..."}]
+        action_allowed = any(
+            (a.get('action') == action_id if isinstance(a, dict) else a == action_id)
+            for a in allowed_actions_v2
+        )
+    elif allowed_actions:
+        action_allowed = action_id in allowed_actions
+
+    if not action_allowed:
+        return None
+
+    # Verify grantor still holds active participant status
+    cur.execute("""
+        SELECT status FROM public.agreement_participants
+        WHERE agreement_id = %s AND user_id = %s
+        LIMIT 1
+    """, (agreement_id, str(grantor_id)))
+    grantor_row = cur.fetchone()
+    if not grantor_row or grantor_row[0] != 'accepted':
+        return None  # Grantor no longer authorized — zombie delegation blocked
+
+    return {
+        'delegation_id':         str(del_id),
+        'grantor_id':            str(grantor_id),
+        'delegate_name':         delegate_name,
+        'scope_type':            scope_type,
+        'scope_constraint':      scope_constraint,
+        'snapshot_id':           str(snap_id) if snap_id else None,
+        'policy_registry_version': pol_ver,
+        'delegation_hash':       del_hash,
+    }
+
+
+def _log_delegation_event(cur, delegation_id: str, event_type: str,
+                           actor_id: str, agreement_id: str,
+                           action_id: str = None, context: dict = None):
+    """Append immutable delegation event."""
+    cur.execute("""
+        SELECT event_hash FROM public.rights_delegation_events
+        WHERE delegation_id = %s
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+    """, (delegation_id,))
+    prev_row = cur.fetchone()
+    prev_hash = prev_row[0] if prev_row else None
+
+    payload = _canonical_json({
+        'delegation_id': delegation_id,
+        'event_type':    event_type,
+        'actor_id':      str(actor_id),
+        'action_id':     action_id,
+    })
+    event_hash = _sha256((prev_hash or '') + payload)
+
+    cur.execute("""
+        INSERT INTO public.rights_delegation_events
+            (delegation_id, event_type, actor_id, agreement_id,
+             action_id, context, event_hash, previous_hash)
+        VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+    """, (delegation_id, event_type, str(actor_id), agreement_id,
+          action_id, json.dumps(context or {}), event_hash, prev_hash))
 
 def get_system_actor_name(actor_id: str) -> str:
     """Return the service name for a system actor, or 'unknown_system'."""
@@ -3534,7 +3651,38 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                         conn.commit()
                     return result
 
-            # 5c. Find actor's participant record (participant-scoped actions only)
+            # 5c. Delegated authority check
+            # Runs before participant check — a delegate is not a participant
+            if action_scope == 'participant':
+                _delegation = _resolve_delegation(cur, agreement_id,
+                                                  actor_id, action_id)
+                if _delegation:
+                    _trace.append(
+                        f'delegated_authority:granted_by:{_delegation["grantor_id"][:8]}'
+                    )
+                    _trace.append(f'delegation_id:{_delegation["delegation_id"][:8]}')
+                    result = _allow(
+                        f"Delegated authority for '{action_id}' granted by "
+                        f"participant '{_delegation['grantor_id'][:8]}'",
+                        'delegated_access', state, None, snap_id,
+                        policy_source='delegated_access'
+                    )
+                    result['rule_trace']   = _trace
+                    result['delegation']   = _delegation
+                    if log:
+                        _log_rights_evaluation(cur, agreement_id, action_id,
+                                               actor_id, True, result['reason'],
+                                               result['decision_source'], context,
+                                               snapshot_id=snap_id,
+                                               action_scope='delegated',
+                                               rule_trace=_trace)
+                        _log_delegation_event(cur, _delegation['delegation_id'],
+                                              'delegation_used', actor_id,
+                                              agreement_id, action_id, context)
+                        conn.commit()
+                    return result
+
+            # 5d. Find actor's participant record (participant-scoped actions only)
             actor_part = next(
                 (p for p in state['participants'] if p['user_id'] == actor_id),
                 None
