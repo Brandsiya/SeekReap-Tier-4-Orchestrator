@@ -3767,7 +3767,7 @@ def evaluate_rights(agreement_id: str, actor_id: str,
                                                rule_trace=_trace)
                         conn.commit()
                     return result
-            _trace.append(f'policy_check:passed:{_policy_source if "RIGHTS_POLICY_MAP" not in str(action_id) else "permission_granted"}')
+            # policy check passed — source resolved at step 9
 
             # 8. Threshold check for publication actions
             if category == 'publication':
