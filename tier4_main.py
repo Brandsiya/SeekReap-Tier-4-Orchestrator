@@ -3226,6 +3226,8 @@ def is_system_actor(actor_id: str) -> bool:
 
 def _resolve_delegation(cur, agreement_id: str, delegate_id: str,
                          action_id: str) -> dict:
+    # Use a fresh cursor to avoid interfering with caller's cursor state
+    cur = cur.connection.cursor()
     """
     Look up active delegation for delegate_id in this agreement.
     Returns delegation row dict or None.
