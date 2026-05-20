@@ -3846,3 +3846,74 @@ def evaluate_rights(agreement_id: str, actor_id: str,
             'attribution_required': True,
             'royalty_pct':     None,
         }
+
+
+@app.route('/internal/delegation-test', methods=['GET'])
+def delegation_engine_test():
+    """Temporary delegation test endpoint — remove before production."""
+    import os
+    if os.environ.get('ENVIRONMENT') == 'production':
+        return jsonify({'error': 'disabled'}), 404
+
+    AGID      = '834518e9-5446-4410-adcb-cfb6e05875eb'
+    GRANTOR   = '1005e836-aac3-4cb9-8f7f-ec4ed28f3f08'
+    DELEGATE  = 'dddddddd-0000-0000-0000-000000000001'
+    NON_ACTOR = 'eeeeeeee-0000-0000-0000-000000000001'
+
+    results = []
+
+    # Test 1: delegate can generate_pdf (in allowed_actions)
+    r = evaluate_rights(AGID, DELEGATE, 'generate_pdf',
+                        context={'source': 'delegation_test'}, log=True)
+    results.append({
+        'test':            'delegate → generate_pdf (allowed)',
+        'allowed':         r['allowed'],
+        'decision_source': r['decision_source'],
+        'rule_trace':      r.get('rule_trace', []),
+    })
+
+    # Test 2: delegate cannot ai_train (not in allowed_actions)
+    r = evaluate_rights(AGID, DELEGATE, 'ai_train',
+                        context={'source': 'delegation_test'}, log=True)
+    results.append({
+        'test':            'delegate → ai_train (not in allowed_actions)',
+        'allowed':         r['allowed'],
+        'decision_source': r['decision_source'],
+        'rule_trace':      r.get('rule_trace', []),
+    })
+
+    # Test 3: delegate cannot sublicense (not in allowed_actions)
+    r = evaluate_rights(AGID, DELEGATE, 'sublicense',
+                        context={'source': 'delegation_test'}, log=True)
+    results.append({
+        'test':            'delegate → sublicense (not in delegation)',
+        'allowed':         r['allowed'],
+        'decision_source': r['decision_source'],
+        'rule_trace':      r.get('rule_trace', []),
+    })
+
+    # Test 4: non-delegated non-participant is still rejected
+    r = evaluate_rights(AGID, NON_ACTOR, 'generate_pdf',
+                        context={'source': 'delegation_test'}, log=True)
+    results.append({
+        'test':            'non-delegated actor → generate_pdf (rejected)',
+        'allowed':         r['allowed'],
+        'decision_source': r['decision_source'],
+        'rule_trace':      r.get('rule_trace', []),
+    })
+
+    # Test 5: grantor (participant) can still generate_pdf directly
+    r = evaluate_rights(AGID, GRANTOR, 'generate_pdf',
+                        context={'source': 'delegation_test'}, log=True)
+    results.append({
+        'test':            'grantor (participant) → generate_pdf (direct)',
+        'allowed':         r['allowed'],
+        'decision_source': r['decision_source'],
+        'rule_trace':      r.get('rule_trace', []),
+    })
+
+    return jsonify({
+        'results':          results,
+        'engine_version':   RIGHTS_ENGINE_VERSION,
+        'policy_version':   POLICY_REGISTRY_VERSION,
+    })
