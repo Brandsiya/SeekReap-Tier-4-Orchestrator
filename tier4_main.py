@@ -2278,7 +2278,7 @@ def list_agreements():
 
     except Exception as e:
         log_error('agreements', 'list_failed', error=str(e))
-        return jsonify({'error': 'Failed to list agreements'}), 500
+        return jsonify({'error': 'Failed to list agreements', 'detail': str(e)}), 500
 
 
 @app.route('/api/agreements/create', methods=['POST'])
