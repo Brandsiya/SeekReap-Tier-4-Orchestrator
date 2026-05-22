@@ -2217,6 +2217,66 @@ def _log_agreement_event(cur, agreement_id, event_type, actor_id, event_data):
     return new_hash
 
 
+@app.route('/api/agreements', methods=['GET'])
+def list_agreements():
+    """List all agreements where the authenticated user is a participant."""
+    claims, err = _require_auth(request)
+    if err: return err
+    user_id = claims.get('sub', '')
+
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT DISTINCT
+                    a.id,
+                    a.status,
+                    a.created_at,
+                    a.updated_at,
+                    a.template_id,
+                    t.name AS template_name,
+                    COUNT(ap2.id) AS participant_count,
+                    ap.status AS my_status,
+                    ap.ownership_percentage
+                FROM public.coownership_agreements a
+                JOIN public.agreement_participants ap
+                    ON ap.agreement_id = a.id AND ap.user_id = %s
+                LEFT JOIN public.agreement_templates t
+                    ON t.id = a.template_id
+                LEFT JOIN public.agreement_participants ap2
+                    ON ap2.agreement_id = a.id
+                GROUP BY a.id, a.status, a.created_at, a.updated_at,
+                         a.template_id, t.name, ap.status, ap.ownership_percentage
+                ORDER BY a.created_at DESC
+                LIMIT 100
+            """, (user_id,))
+
+            rows = cur.fetchall()
+            agreements = []
+            for row in rows:
+                (agr_id, status, created_at, updated_at, tmpl_id,
+                 tmpl_name, participant_count, my_status, ownership_pct) = row
+                agreements.append({
+                    'id':                  str(agr_id),
+                    'status':              status,
+                    'created_at':          created_at.isoformat() if created_at else None,
+                    'updated_at':          updated_at.isoformat() if updated_at else None,
+                    'template_id':         str(tmpl_id) if tmpl_id else None,
+                    'template_name':       tmpl_name,
+                    'participant_count':   participant_count,
+                    'my_status':           my_status,
+                    'ownership_percentage': float(ownership_pct) if ownership_pct else None,
+                })
+
+            return jsonify({
+                'agreements': agreements,
+                'total':      len(agreements),
+            })
+
+    except Exception as e:
+        log_error('agreements', 'list_failed', error=str(e))
+        return jsonify({'error': 'Failed to list agreements'}), 500
+
+
 @app.route('/api/agreements/create', methods=['POST'])
 def create_agreement():
     """Create a co-ownership agreement for a submission."""
