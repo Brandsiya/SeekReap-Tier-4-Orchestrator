@@ -2227,25 +2227,26 @@ def list_agreements():
     try:
         with db_cursor() as (conn, cur):
             cur.execute("""
-                SELECT DISTINCT
+                SELECT
                     a.id,
                     a.status,
                     a.created_at,
-                    a.updated_at,
-                    a.template_id,
-                    t.name AS template_name,
+                    a.activated_at,
+                    a.submission_id,
+                    a.commercial_use,
+                    a.derivative_works,
+                    a.ai_training_permitted,
                     COUNT(ap2.id) AS participant_count,
-                    ap.status AS my_status,
+                    ap.status        AS my_status,
                     ap.ownership_percentage
                 FROM public.coownership_agreements a
                 JOIN public.agreement_participants ap
                     ON ap.agreement_id = a.id AND ap.user_id = %s
-                LEFT JOIN public.agreement_templates t
-                    ON t.id = a.template_id
                 LEFT JOIN public.agreement_participants ap2
                     ON ap2.agreement_id = a.id
-                GROUP BY a.id, a.status, a.created_at, a.updated_at,
-                         a.template_id, t.name, ap.status, ap.ownership_percentage
+                GROUP BY a.id, a.status, a.created_at, a.activated_at,
+                         a.submission_id, a.commercial_use, a.derivative_works,
+                         a.ai_training_permitted, ap.status, ap.ownership_percentage
                 ORDER BY a.created_at DESC
                 LIMIT 100
             """, (user_id,))
@@ -2253,18 +2254,21 @@ def list_agreements():
             rows = cur.fetchall()
             agreements = []
             for row in rows:
-                (agr_id, status, created_at, updated_at, tmpl_id,
-                 tmpl_name, participant_count, my_status, ownership_pct) = row
+                (agr_id, status, created_at, activated_at, submission_id,
+                 commercial_use, derivative_works, ai_training_permitted,
+                 participant_count, my_status, ownership_pct) = row
                 agreements.append({
-                    'id':                  str(agr_id),
-                    'status':              status,
-                    'created_at':          created_at.isoformat() if created_at else None,
-                    'updated_at':          updated_at.isoformat() if updated_at else None,
-                    'template_id':         str(tmpl_id) if tmpl_id else None,
-                    'template_name':       tmpl_name,
-                    'participant_count':   participant_count,
-                    'my_status':           my_status,
-                    'ownership_percentage': float(ownership_pct) if ownership_pct else None,
+                    'id':                    str(agr_id),
+                    'status':                status,
+                    'created_at':            created_at.isoformat() if created_at else None,
+                    'activated_at':          activated_at.isoformat() if activated_at else None,
+                    'submission_id':         str(submission_id) if submission_id else None,
+                    'commercial_use':        commercial_use,
+                    'derivative_works':      derivative_works,
+                    'ai_training_permitted': ai_training_permitted,
+                    'participant_count':     participant_count,
+                    'my_status':             my_status,
+                    'ownership_percentage':  float(ownership_pct) if ownership_pct else None,
                 })
 
             return jsonify({
