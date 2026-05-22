@@ -2238,7 +2238,7 @@ def list_agreements():
                     a.ai_training_permitted,
                     COUNT(ap2.id) AS participant_count,
                     ap.status        AS my_status,
-                    ap.ownership_percentage
+                    ap.ownership_pct
                 FROM public.coownership_agreements a
                 JOIN public.agreement_participants ap
                     ON ap.agreement_id = a.id AND ap.user_id = %s
@@ -2246,7 +2246,7 @@ def list_agreements():
                     ON ap2.agreement_id = a.id
                 GROUP BY a.id, a.status, a.created_at, a.activated_at,
                          a.submission_id, a.commercial_use, a.derivative_works,
-                         a.ai_training_permitted, ap.status, ap.ownership_percentage
+                         a.ai_training_permitted, ap.status, ap.ownership_pct
                 ORDER BY a.created_at DESC
                 LIMIT 100
             """, (user_id,))
@@ -2268,7 +2268,7 @@ def list_agreements():
                     'ai_training_permitted': ai_training_permitted,
                     'participant_count':     participant_count,
                     'my_status':             my_status,
-                    'ownership_percentage':  float(ownership_pct) if ownership_pct else None,
+                    'ownership_pct':         float(ownership_pct) if ownership_pct else None,
                 })
 
             return jsonify({
