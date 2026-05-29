@@ -2360,6 +2360,35 @@ def create_agreement():
     if abs(total_pct - 100.0) > 0.01:
         return jsonify({'error': f'ownership_pct must sum to 100 (got {total_pct})'}), 400
 
+    # Rights Engine — evaluate create_agreement using submission's active agreement
+    # For new agreements we use the submission_id to find any existing agreement context.
+    # Log-only on first creation (no prior agreement to check membership against).
+    try:
+        _existing_agr = None
+        with db_cursor() as (_c, _cur):
+            _cur.execute("""
+                SELECT id FROM public.coownership_agreements
+                WHERE submission_id = %s AND status = 'active'
+                LIMIT 1
+            """, (submission_id,))
+            _row = _cur.fetchone()
+            _existing_agr = str(_row[0]) if _row else None
+
+        if _existing_agr:
+            _rights_result = evaluate_rights(
+                _existing_agr, creator_id, 'create_agreement',
+                context={'source': 'create_agreement', 'submission_id': submission_id},
+                log=True
+            )
+            if not _rights_result['allowed']:
+                return jsonify({
+                    'error':           'Rights check failed',
+                    'reason':          _rights_result['reason'],
+                    'decision_source': _rights_result['decision_source'],
+                }), 403
+    except Exception as _re:
+        log_error('rights_engine', 'create_agreement_eval_failed', error=str(_re))
+
     try:
         with db_cursor() as (conn, cur):
             # Verify submission belongs to creator
@@ -3267,6 +3296,7 @@ RIGHTS_ACTION_SCOPES = {
     'freeze_asset':       'participant',
     'generate_pdf':       'participant',
     'accept_invitation':  'participant',
+                'create_agreement':    'participant',
     'verify_chain':       'public',
 }
 
