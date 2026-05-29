@@ -2281,6 +2281,63 @@ def list_agreements():
         return jsonify({'error': 'Failed to list agreements', 'detail': str(e)}), 500
 
 
+@app.route('/api/verify-certificate', methods=['GET'])
+def verify_certificate_public():
+    """Public endpoint — verify a certificate by cert_id or submission ID."""
+    cert_id = request.args.get('cert_id', '').strip()
+    if not cert_id:
+        return jsonify({'error': 'cert_id required'}), 400
+
+    try:
+        with db_cursor() as (conn, cur):
+            # Look up by cert_id or certificate_id in submissions
+            cur.execute("""
+                SELECT s.id, s.title, s.cert_id, s.certificate_id,
+                       s.status, s.submitted_at, s.completed_at,
+                       s.content_type, s.creator_id
+                FROM public.submissions s
+                WHERE s.cert_id = %s
+                   OR s.certificate_id = %s
+                   OR s.id::text = %s
+                LIMIT 1
+            """, (cert_id, cert_id, cert_id))
+
+            row = cur.fetchone()
+            if not row:
+                return jsonify({'valid': False, 'error': 'Certificate not found'}), 404
+
+            (sub_id, title, cert_id_val, certificate_id,
+             status, submitted_at, completed_at,
+             content_type, creator_id) = row
+
+            # Also get agreement if exists
+            cur.execute("""
+                SELECT a.id, a.status, a.activated_at, a.agreement_hash
+                FROM public.coownership_agreements a
+                WHERE a.submission_id = %s AND a.status = 'active'
+                LIMIT 1
+            """, (str(sub_id),))
+            agr = cur.fetchone()
+
+            return jsonify({
+                'valid':        status == 'COMPLETED',
+                'chain_valid':  status == 'COMPLETED',
+                'cert_id':      cert_id_val or certificate_id or cert_id,
+                'submission_id': str(sub_id),
+                'title':        title or 'Certified Work',
+                'content_type': content_type,
+                'status':       status,
+                'submitted_at': submitted_at.isoformat() if submitted_at else None,
+                'activated_at': completed_at.isoformat() if completed_at else None,
+                'agreement_id': str(agr[0]) if agr else None,
+                'final_hash':   agr[3] if agr else None,
+            })
+
+    except Exception as e:
+        log_error('verify', 'public_verify_failed', error=str(e))
+        return jsonify({'error': 'Verification failed', 'detail': str(e)}), 500
+
+
 @app.route('/api/agreements/create', methods=['POST'])
 def create_agreement():
     """Create a co-ownership agreement for a submission."""
