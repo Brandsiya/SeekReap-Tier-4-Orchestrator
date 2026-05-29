@@ -3317,6 +3317,7 @@ RIGHTS_POLICY_MAP = {
     'freeze_asset':       (True,                              'owner_governance_right'),
     'generate_pdf':       (True,                              'permission_granted'),
     'accept_invitation':  (True,                              'permission_granted'),
+    'create_agreement':    (True,                              'permission_granted'),
     'verify_chain':       (True,                              'permission_granted'),
 }
 
