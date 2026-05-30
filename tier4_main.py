@@ -2275,34 +2275,21 @@ def revoke_agreement(agreement_id):
             """, (user_id, agreement_id))
             revoked_delegations = [str(r[0]) for r in cur.fetchall()]
 
-            # 4. Log revocation event to agreement_events
-            import hashlib as _hl, json as _json
+            # 4. Log revocation event using canonical chain hash
+            # Must use _log_agreement_event to match _recompute_hash format
+            _log_agreement_event(cur, agreement_id, 'revoked', user_id, {
+                'reason':    reason,
+                'revoked_by': user_id,
+            })
+
+            # Retrieve the hash that was just written for the response
             cur.execute("""
                 SELECT event_hash FROM public.agreement_events
-                WHERE agreement_id = %s
-                ORDER BY created_at DESC, id DESC
-                LIMIT 1
+                WHERE agreement_id = %s AND event_type = 'revoked'
+                ORDER BY created_at DESC LIMIT 1
             """, (agreement_id,))
-            prev = cur.fetchone()
-            prev_hash = prev[0] if prev else None
-
-            event_payload = _json.dumps({
-                'agreement_id': agreement_id,
-                'event_type':   'revoked',
-                'actor_id':     user_id,
-                'reason':       reason,
-            }, sort_keys=True)
-            event_hash = _hl.sha256(
-                ((prev_hash or '') + event_payload).encode()
-            ).hexdigest()
-
-            cur.execute("""
-                INSERT INTO public.agreement_events
-                    (agreement_id, event_type, actor_id, event_data,
-                     event_hash, previous_hash)
-                VALUES (%s, %s, %s, %s::jsonb, %s, %s)
-            """, (agreement_id, 'revoked', user_id,
-                  event_payload, event_hash, prev_hash))
+            _ev = cur.fetchone()
+            event_hash = _ev[0] if _ev else None
 
             # 5. Take a revocation rights snapshot
             revocation_snap_id = _store_rights_snapshot(
