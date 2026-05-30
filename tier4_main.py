@@ -2276,10 +2276,10 @@ def revoke_agreement(agreement_id):
             revoked_delegations = [str(r[0]) for r in cur.fetchall()]
 
             # 4. Log revocation event using canonical chain hash
-            # Must use _log_agreement_event to match _recompute_hash format
+            # event_data must contain ONLY domain fields — no actor_id, event_type,
+            # or agreement_id since _recompute_hash prepends 'type' automatically.
             _log_agreement_event(cur, agreement_id, 'revoked', user_id, {
-                'reason':    reason,
-                'revoked_by': user_id,
+                'reason': reason,
             })
 
             # Retrieve the hash that was just written for the response
