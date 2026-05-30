@@ -2288,7 +2288,7 @@ def revoke_agreement(agreement_id):
 
             event_payload = _json.dumps({
                 'agreement_id': agreement_id,
-                'event_type':   'agreement_revoked',
+                'event_type':   'revoked',
                 'actor_id':     user_id,
                 'reason':       reason,
             }, sort_keys=True)
@@ -2301,7 +2301,7 @@ def revoke_agreement(agreement_id):
                     (agreement_id, event_type, actor_id, event_data,
                      event_hash, previous_hash)
                 VALUES (%s, %s, %s, %s::jsonb, %s, %s)
-            """, (agreement_id, 'agreement_revoked', user_id,
+            """, (agreement_id, 'revoked', user_id,
                   event_payload, event_hash, prev_hash))
 
             # 5. Take a revocation rights snapshot
