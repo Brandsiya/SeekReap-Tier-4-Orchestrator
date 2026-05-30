@@ -6,3 +6,4 @@ python-dotenv
 qrcode[pil]==7.4.2
 python-jose>=3.3.0
 gunicorn
+reportlab==4.2.0
