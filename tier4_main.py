@@ -2386,6 +2386,240 @@ def list_agreements():
         return jsonify({'error': 'Failed to list agreements', 'detail': str(e)}), 500
 
 
+# ══════════════════════════════════════════════════════════════════
+# PHASE 2 — ASSET IDENTITY LAYER v1
+# Canonical asset identity: links submission → fingerprints → ownership → cert
+# ══════════════════════════════════════════════════════════════════
+
+@app.route('/api/assets/register', methods=['POST'])
+def register_asset_identity():
+    """
+    Register or update canonical asset identity for a submission.
+    Links fingerprint data, ownership snapshot, and cert_id into
+    a single tamper-evident identity record.
+    """
+    claims, err = _require_auth(request)
+    if err: return err
+    user_id = claims.get('sub', '')
+    data    = request.get_json(force=True) or {}
+
+    submission_id = data.get('submission_id')
+    if not submission_id:
+        return jsonify({'error': 'submission_id required'}), 400
+
+    try:
+        with db_cursor() as (conn, cur):
+            # 1. Verify submission belongs to caller
+            cur.execute("""
+                SELECT id, content_type, content_hash, cert_id,
+                       submitted_at, title
+                FROM public.submissions
+                WHERE id = %s AND creator_id = %s
+            """, (submission_id, user_id))
+            sub = cur.fetchone()
+            if not sub:
+                return jsonify({'error': 'Submission not found or access denied'}), 404
+
+            (sub_id, content_type, content_hash, cert_id,
+             submitted_at, title) = sub
+
+            # 2. Pull fingerprint data if available
+            cur.execute("""
+                SELECT visual_phash, audio_fingerprint,
+                       fingerprint_version, registry_id
+                FROM public.fingerprints
+                WHERE submission_id = %s
+                LIMIT 1
+            """, (submission_id,))
+            fp = cur.fetchone()
+            perceptual_hash    = fp[0] if fp else data.get('perceptual_hash')
+            audio_fingerprint  = fp[1] if fp else data.get('audio_fingerprint')
+            fingerprint_version = fp[2] if fp else 'v1'
+
+            # 3. Pull active agreement for ownership snapshot
+            cur.execute("""
+                SELECT a.id, ap.ownership_pct, ap.role
+                FROM public.coownership_agreements a
+                JOIN public.agreement_participants ap
+                    ON ap.agreement_id = a.id AND ap.user_id = %s
+                WHERE a.submission_id = %s AND a.status = 'active'
+                LIMIT 1
+            """, (user_id, submission_id))
+            agr = cur.fetchone()
+
+            ownership_snapshot = None
+            agreement_id       = None
+            if agr:
+                agreement_id = str(agr[0])
+                # Build full ownership snapshot
+                cur.execute("""
+                    SELECT ap.user_id, ap.email, ap.role,
+                           ap.ownership_pct, ap.status
+                    FROM public.agreement_participants ap
+                    WHERE ap.agreement_id = %s
+                """, (agreement_id,))
+                participants = [{
+                    'user_id':       str(p[0]),
+                    'email':         p[1],
+                    'role':          p[2],
+                    'ownership_pct': float(p[3]) if p[3] else 0,
+                    'status':        p[4],
+                } for p in cur.fetchall()]
+                ownership_snapshot = {
+                    'agreement_id': agreement_id,
+                    'participants': participants,
+                    'snapshot_at':  datetime.utcnow().isoformat(),
+                }
+
+            # 4. Compute tamper hash over canonical identity fields
+            identity_payload = _canonical_json({
+                'submission_id':    submission_id,
+                'content_type':     content_type or '',
+                'content_hash':     content_hash or '',
+                'perceptual_hash':  perceptual_hash or '',
+                'cert_id':          cert_id or '',
+                'registered_by':    user_id,
+                'origin_timestamp': submitted_at.isoformat() if submitted_at else '',
+            })
+            tamper_hash = _sha256(identity_payload)
+
+            # 5. Upsert asset identity record
+            cur.execute("""
+                INSERT INTO public.asset_identities (
+                    submission_id, content_hash, perceptual_hash,
+                    audio_fingerprint, fingerprint_version,
+                    content_type, file_size_bytes, duration_seconds,
+                    origin_timestamp, registered_by, cert_id,
+                    agreement_id, ownership_snapshot, tamper_hash
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s::jsonb, %s
+                )
+                ON CONFLICT (submission_id) DO UPDATE SET
+                    content_hash        = EXCLUDED.content_hash,
+                    perceptual_hash     = EXCLUDED.perceptual_hash,
+                    audio_fingerprint   = EXCLUDED.audio_fingerprint,
+                    fingerprint_version = EXCLUDED.fingerprint_version,
+                    cert_id             = EXCLUDED.cert_id,
+                    agreement_id        = EXCLUDED.agreement_id,
+                    ownership_snapshot  = EXCLUDED.ownership_snapshot,
+                    tamper_hash         = EXCLUDED.tamper_hash,
+                    registered_at       = NOW()
+                RETURNING id, canonical_id, registered_at
+            """, (
+                submission_id,
+                content_hash or data.get('content_hash'),
+                perceptual_hash,
+                audio_fingerprint,
+                fingerprint_version,
+                content_type,
+                data.get('file_size_bytes'),
+                data.get('duration_seconds'),
+                submitted_at,
+                user_id,
+                cert_id or data.get('cert_id'),
+                agreement_id,
+                json.dumps(ownership_snapshot) if ownership_snapshot else None,
+                tamper_hash,
+            ))
+            row = cur.fetchone()
+            asset_id, canonical_id, registered_at = row
+
+            # 6. Update submissions.canonical_id if not set
+            cur.execute("""
+                UPDATE public.submissions
+                SET canonical_id = %s
+                WHERE id = %s AND canonical_id IS NULL
+            """, (str(canonical_id), submission_id))
+
+            conn.commit()
+
+            log_info('asset_identity', 'registered',
+                     submission_id=submission_id,
+                     asset_id=str(asset_id),
+                     canonical_id=str(canonical_id))
+
+            return jsonify({
+                'asset_id':         str(asset_id),
+                'canonical_id':     str(canonical_id),
+                'submission_id':    submission_id,
+                'tamper_hash':      tamper_hash,
+                'cert_id':          cert_id or data.get('cert_id'),
+                'agreement_id':     agreement_id,
+                'registered_at':    registered_at.isoformat(),
+                'ownership_snapshot': ownership_snapshot,
+            }), 201
+
+    except Exception as e:
+        log_error('asset_identity', 'register_failed', error=str(e))
+        return jsonify({'error': 'Asset registration failed', 'detail': str(e)}), 500
+
+
+@app.route('/api/assets/<submission_id>', methods=['GET'])
+def get_asset_identity(submission_id):
+    """
+    Retrieve canonical asset identity for a submission.
+    Public endpoint — no auth required for ownership proof retrieval.
+    """
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT
+                    ai.id, ai.canonical_id, ai.submission_id,
+                    ai.content_hash, ai.perceptual_hash,
+                    ai.audio_fingerprint, ai.fingerprint_version,
+                    ai.content_type, ai.file_size_bytes,
+                    ai.duration_seconds, ai.origin_timestamp,
+                    ai.registered_at, ai.registered_by,
+                    ai.cert_id, ai.agreement_id,
+                    ai.ownership_snapshot, ai.tamper_hash,
+                    ai.identity_version,
+                    s.title, s.status AS submission_status
+                FROM public.asset_identities ai
+                JOIN public.submissions s ON s.id = ai.submission_id
+                WHERE ai.submission_id = %s
+                   OR ai.canonical_id::text = %s
+                LIMIT 1
+            """, (submission_id, submission_id))
+
+            row = cur.fetchone()
+            if not row:
+                return jsonify({'error': 'Asset identity not found'}), 404
+
+            (asset_id, canonical_id, sub_id, content_hash,
+             perceptual_hash, audio_fingerprint, fp_version,
+             content_type, file_size, duration, origin_ts,
+             registered_at, registered_by, cert_id, agreement_id,
+             ownership_snapshot, tamper_hash, identity_version,
+             title, submission_status) = row
+
+            return jsonify({
+                'asset_id':           str(asset_id),
+                'canonical_id':       str(canonical_id),
+                'submission_id':      str(sub_id),
+                'title':              title,
+                'content_type':       content_type,
+                'content_hash':       content_hash,
+                'perceptual_hash':    perceptual_hash,
+                'audio_fingerprint':  audio_fingerprint,
+                'fingerprint_version': fp_version,
+                'file_size_bytes':    file_size,
+                'duration_seconds':   duration,
+                'origin_timestamp':   origin_ts.isoformat() if origin_ts else None,
+                'registered_at':      registered_at.isoformat(),
+                'cert_id':            cert_id,
+                'agreement_id':       str(agreement_id) if agreement_id else None,
+                'ownership_snapshot': ownership_snapshot,
+                'tamper_hash':        tamper_hash,
+                'identity_version':   identity_version,
+                'submission_status':  submission_status,
+            })
+
+    except Exception as e:
+        log_error('asset_identity', 'get_failed', error=str(e))
+        return jsonify({'error': 'Asset lookup failed', 'detail': str(e)}), 500
+
+
 @app.route('/api/verify-certificate', methods=['GET'])
 def verify_certificate_public():
     """Public endpoint — verify a certificate by cert_id or submission ID."""
