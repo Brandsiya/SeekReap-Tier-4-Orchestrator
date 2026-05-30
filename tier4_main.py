@@ -2217,6 +2217,124 @@ def _log_agreement_event(cur, agreement_id, event_type, actor_id, event_data):
     return new_hash
 
 
+@app.route('/api/agreements/<agreement_id>/revoke', methods=['POST'])
+def revoke_agreement(agreement_id):
+    """
+    Revoke an agreement. Requires unanimous consent (all participants must be accepted).
+    Cascades to: delegations revoked, future evaluations blocked, event logged.
+    """
+    claims, err = _require_auth(request)
+    if err: return err
+    user_id = claims.get('sub', '')
+    data    = request.get_json(force=True) or {}
+    reason  = data.get('reason', 'creator_initiated')
+
+    # Rights Engine gate — revoke_agreement requires unanimous + participant check
+    rights = evaluate_rights(agreement_id, user_id, 'revoke_agreement',
+                             context={'source': 'revoke_route', 'reason': reason},
+                             log=True)
+    if not rights['allowed']:
+        return jsonify({
+            'error':           'Rights check failed',
+            'reason':          rights['reason'],
+            'decision_source': rights['decision_source'],
+        }), 403
+
+    try:
+        with db_cursor() as (conn, cur):
+
+            # 1. Verify agreement exists and is active
+            cur.execute("""
+                SELECT status, created_by FROM public.coownership_agreements
+                WHERE id = %s
+            """, (agreement_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({'error': 'Agreement not found'}), 404
+            if row[0] != 'active':
+                return jsonify({'error': f'Agreement is already {row[0]}'}), 409
+
+            # 2. Revoke the agreement
+            cur.execute("""
+                UPDATE public.coownership_agreements
+                SET status           = 'revoked',
+                    revoked_at       = NOW(),
+                    revocation_reason = %s
+                WHERE id = %s
+            """, (reason, agreement_id))
+
+            # 3. Cascade — revoke all active delegations for this agreement
+            cur.execute("""
+                UPDATE public.rights_delegations
+                SET status     = 'revoked',
+                    revoked_at = NOW(),
+                    revoked_by = %s
+                WHERE agreement_id = %s
+                  AND status = 'active'
+                RETURNING id
+            """, (user_id, agreement_id))
+            revoked_delegations = [str(r[0]) for r in cur.fetchall()]
+
+            # 4. Log revocation event to agreement_events
+            import hashlib as _hl, json as _json
+            cur.execute("""
+                SELECT event_hash FROM public.agreement_events
+                WHERE agreement_id = %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+            """, (agreement_id,))
+            prev = cur.fetchone()
+            prev_hash = prev[0] if prev else None
+
+            event_payload = _json.dumps({
+                'agreement_id': agreement_id,
+                'event_type':   'agreement_revoked',
+                'actor_id':     user_id,
+                'reason':       reason,
+            }, sort_keys=True)
+            event_hash = _hl.sha256(
+                ((prev_hash or '') + event_payload).encode()
+            ).hexdigest()
+
+            cur.execute("""
+                INSERT INTO public.agreement_events
+                    (agreement_id, event_type, actor_id, event_data,
+                     event_hash, previous_hash)
+                VALUES (%s, %s, %s, %s::jsonb, %s, %s)
+            """, (agreement_id, 'agreement_revoked', user_id,
+                  event_payload, event_hash, prev_hash))
+
+            # 5. Take a revocation rights snapshot
+            revocation_snap_id = _store_rights_snapshot(
+                cur, agreement_id,
+                _build_rights_snapshot(cur, agreement_id) or {},
+                'revocation'
+            )
+
+            conn.commit()
+
+            log_info('agreements', 'agreement_revoked',
+                     agreement_id=agreement_id,
+                     revoked_by=user_id,
+                     delegations_revoked=len(revoked_delegations),
+                     snap_id=revocation_snap_id)
+
+            return jsonify({
+                'agreement_id':        agreement_id,
+                'status':              'revoked',
+                'revoked_by':          user_id,
+                'reason':              reason,
+                'delegations_revoked': len(revoked_delegations),
+                'revocation_snapshot': revocation_snap_id,
+                'event_hash':          event_hash,
+            })
+
+    except Exception as e:
+        log_error('agreements', 'revoke_failed',
+                  agreement_id=agreement_id, error=str(e))
+        return jsonify({'error': 'Revocation failed', 'detail': str(e)}), 500
+
+
 @app.route('/api/agreements', methods=['GET'])
 def list_agreements():
     """List all agreements where the authenticated user is a participant."""
