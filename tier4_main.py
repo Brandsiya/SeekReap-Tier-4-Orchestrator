@@ -2525,12 +2525,9 @@ def register_asset_identity():
             row = cur.fetchone()
             asset_id, canonical_id, registered_at = row
 
-            # 6. Update submissions.canonical_id if not set
-            cur.execute("""
-                UPDATE public.submissions
-                SET canonical_id = %s
-                WHERE id = %s AND canonical_id IS NULL
-            """, (str(canonical_id), submission_id))
+            # 6. Skip updating submissions.canonical_id directly —
+            # it has a FK constraint to content_canonical table.
+            # canonical_id lives in asset_identities instead.
 
             conn.commit()
 
