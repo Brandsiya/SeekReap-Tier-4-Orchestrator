@@ -2707,6 +2707,154 @@ def submit_enforcement_package(package_id):
         return jsonify({'error': 'Submission failed'}), 500
 
 
+@app.route('/api/enforcement/proof/<asset_id>', methods=['GET'])
+def get_ownership_proof(asset_id):
+    """
+    Lightweight public ownership proof by asset_id or canonical_id.
+    Used by marketplaces, partners, and licensing systems.
+    No auth required.
+    """
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT
+                    ai.id, ai.canonical_id, ai.submission_id,
+                    ai.cert_id, ai.agreement_id, ai.tamper_hash,
+                    ai.content_type, ai.origin_timestamp,
+                    ai.ownership_snapshot, ai.registered_at
+                FROM public.asset_identities ai
+                WHERE ai.id::text = %s
+                   OR ai.canonical_id::text = %s
+                LIMIT 1
+            """, (asset_id, asset_id))
+            asset = cur.fetchone()
+            if not asset:
+                return jsonify({'error': 'Asset not found'}), 404
+
+            (a_id, canonical_id, submission_id, cert_id,
+             agreement_id, tamper_hash, content_type,
+             origin_ts, ownership_snapshot, registered_at) = asset
+
+            # Extract owners from snapshot
+            owners = []
+            if ownership_snapshot and 'participants' in ownership_snapshot:
+                owners = [{
+                    'email':         p.get('email'),
+                    'role':          p.get('role'),
+                    'ownership_pct': p.get('ownership_pct'),
+                    'status':        p.get('status'),
+                } for p in ownership_snapshot['participants']]
+
+            return jsonify({
+                'asset_id':        str(a_id),
+                'canonical_id':    str(canonical_id),
+                'submission_id':   str(submission_id),
+                'cert_id':         cert_id,
+                'agreement_id':    str(agreement_id) if agreement_id else None,
+                'content_type':    content_type,
+                'origin_timestamp': origin_ts.isoformat() if origin_ts else None,
+                'registered_at':   registered_at.isoformat(),
+                'tamper_hash':     tamper_hash,
+                'owners':          owners,
+            })
+
+    except Exception as e:
+        log_error('enforcement', 'proof_failed', error=str(e))
+        return jsonify({'error': 'Ownership proof lookup failed'}), 500
+
+
+@app.route('/api/enforcement/takedown', methods=['POST'])
+def generate_takedown():
+    """
+    Generate a platform-specific takedown payload from an evidence package.
+    Links to an existing evidence package and creates a submission record.
+    """
+    claims, err = _require_auth(request)
+    if err: return err
+    user_id = claims.get('sub', '')
+    data    = request.get_json(force=True) or {}
+
+    evidence_package_id = data.get('evidence_package_id')
+    platform            = data.get('platform', '').lower()
+    infringing_url      = data.get('infringing_url', '')
+
+    if not evidence_package_id:
+        return jsonify({'error': 'evidence_package_id required'}), 400
+    if not platform:
+        return jsonify({'error': 'platform required'}), 400
+
+    try:
+        with db_cursor() as (conn, cur):
+            # Fetch evidence package
+            cur.execute("""
+                SELECT id, submission_id, cert_id,
+                       ownership_proof, evidence_bundle, package_hash
+                FROM public.enforcement_packages
+                WHERE id = %s AND creator_id = %s
+            """, (evidence_package_id, user_id))
+            pkg = cur.fetchone()
+            if not pkg:
+                return jsonify({'error': 'Evidence package not found'}), 404
+
+            (pkg_id, submission_id, cert_id,
+             ownership_proof, evidence_bundle, package_hash) = pkg
+
+            # Build platform-specific takedown payload
+            claimant = None
+            owners   = []
+            if ownership_proof and 'agreement' in ownership_proof:
+                participants = ownership_proof['agreement'].get('participants', [])
+                if participants:
+                    claimant = participants[0].get('email')
+                    owners   = participants
+
+            takedown_payload = {
+                'platform':         platform,
+                'infringing_url':   infringing_url or (
+                    evidence_bundle or {}
+                ).get('infringing_url', ''),
+                'claimant':         claimant,
+                'cert_id':          cert_id,
+                'ownership_proof':  {
+                    'cert_id':       cert_id,
+                    'canonical_id':  (ownership_proof or {}).get(
+                        'asset_identity', {}).get('canonical_id'),
+                    'tamper_hash':   (ownership_proof or {}).get(
+                        'asset_identity', {}).get('tamper_hash'),
+                    'agreement_hash': (ownership_proof or {}).get(
+                        'agreement', {}).get('agreement_hash'),
+                    'owners':        owners,
+                },
+                'evidence_package_id': str(pkg_id),
+                'package_hash':      package_hash,
+                'generated_at':      datetime.utcnow().isoformat(),
+            }
+
+            # Store as enforcement submission
+            cur.execute("""
+                INSERT INTO public.enforcement_events
+                    (package_id, event_type, actor_id, notes, metadata)
+                VALUES (%s, 'package_submitted', %s, %s, %s::jsonb)
+            """, (str(pkg_id), user_id,
+                  f'Takedown generated for {platform}',
+                  json.dumps({'platform': platform,
+                              'infringing_url': infringing_url})))
+
+            conn.commit()
+
+            return jsonify({
+                'takedown_payload': takedown_payload,
+                'evidence_package_id': str(pkg_id),
+                'platform':          platform,
+                'status':            'draft',
+            }), 201
+
+    except Exception as e:
+        log_error('enforcement', 'takedown_failed', error=str(e))
+        return jsonify({'error': 'Takedown generation failed',
+                        'detail': str(e)}), 500
+
+
 @app.route('/api/enforcement/list', methods=['GET'])
 def list_enforcement_packages():
     """List all enforcement packages for the authenticated creator."""
