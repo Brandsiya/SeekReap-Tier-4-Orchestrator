@@ -2387,6 +2387,368 @@ def list_agreements():
 
 
 # ══════════════════════════════════════════════════════════════════
+# PHASE 3 — ENFORCEMENT TOOLING v1
+# Evidence packages, takedown generation, enforcement tracking
+# ══════════════════════════════════════════════════════════════════
+
+@app.route('/api/enforcement/evidence-package', methods=['POST'])
+def create_evidence_package():
+    """
+    Compile a structured enforcement evidence package for a submission.
+    Bundles: asset identity, ownership proof, agreement chain, cert,
+    content matches, and generates a tamper-evident package hash.
+    """
+    claims, err = _require_auth(request)
+    if err: return err
+    user_id = claims.get('sub', '')
+    data    = request.get_json(force=True) or {}
+
+    submission_id      = data.get('submission_id')
+    package_type       = data.get('package_type', 'takedown')
+    target_platform    = data.get('target_platform')
+    target_url         = data.get('target_url')
+    infringing_url     = data.get('infringing_url')
+    infringement_notes = data.get('infringement_notes', '')
+
+    if not submission_id:
+        return jsonify({'error': 'submission_id required'}), 400
+
+    valid_types = ('takedown', 'counter_notice',
+                   'licensing_demand', 'infringement_report')
+    if package_type not in valid_types:
+        return jsonify({'error': f'package_type must be one of {valid_types}'}), 400
+
+    try:
+        with db_cursor() as (conn, cur):
+
+            # 1. Verify submission belongs to creator
+            cur.execute("""
+                SELECT id, title, content_type, status,
+                       cert_id, submitted_at, completed_at, content_hash
+                FROM public.submissions
+                WHERE id = %s AND creator_id = %s
+            """, (submission_id, user_id))
+            sub = cur.fetchone()
+            if not sub:
+                return jsonify({'error': 'Submission not found or access denied'}), 404
+
+            (sub_id, title, content_type, sub_status,
+             cert_id, submitted_at, completed_at, content_hash) = sub
+
+            # 2. Pull asset identity
+            cur.execute("""
+                SELECT id, canonical_id, tamper_hash,
+                       perceptual_hash, ownership_snapshot
+                FROM public.asset_identities
+                WHERE submission_id = %s
+                LIMIT 1
+            """, (submission_id,))
+            asset = cur.fetchone()
+            asset_identity_id = None
+            if asset:
+                asset_identity_id = str(asset[0])
+
+            # 3. Pull active agreement + chain
+            cur.execute("""
+                SELECT a.id, a.status, a.agreement_hash,
+                       a.activated_at, a.commercial_use,
+                       a.derivative_works, a.ai_training_permitted
+                FROM public.coownership_agreements a
+                JOIN public.agreement_participants ap
+                    ON ap.agreement_id = a.id AND ap.user_id = %s
+                WHERE a.submission_id = %s AND a.status = 'active'
+                LIMIT 1
+            """, (user_id, submission_id))
+            agr = cur.fetchone()
+            agreement_id = None
+            agreement_proof = None
+            if agr:
+                agreement_id = str(agr[0])
+                # Get participants
+                cur.execute("""
+                    SELECT user_id, email, role, ownership_pct, status
+                    FROM public.agreement_participants
+                    WHERE agreement_id = %s
+                """, (agreement_id,))
+                participants = [{
+                    'user_id':       str(p[0]),
+                    'email':         p[1],
+                    'role':          p[2],
+                    'ownership_pct': float(p[3]) if p[3] else 0,
+                    'status':        p[4],
+                } for p in cur.fetchall()]
+                agreement_proof = {
+                    'agreement_id':         agreement_id,
+                    'status':               agr[1],
+                    'agreement_hash':       agr[2],
+                    'activated_at':         agr[3].isoformat() if agr[3] else None,
+                    'commercial_use':       agr[4],
+                    'derivative_works':     agr[5],
+                    'ai_training_permitted': agr[6],
+                    'participants':         participants,
+                }
+
+            # 4. Pull content matches if any
+            cur.execute("""
+                SELECT id, matched_submission_id, similarity_score,
+                       match_type, severity, detected_at
+                FROM public.content_matches
+                WHERE submission_id = %s
+                ORDER BY similarity_score DESC
+                LIMIT 20
+            """, (submission_id,))
+            matches = [{
+                'match_id':            str(m[0]),
+                'matched_submission':  str(m[1]) if m[1] else None,
+                'similarity_score':    float(m[2]) if m[2] else None,
+                'match_type':          m[3],
+                'severity':            m[4],
+                'detected_at':         m[5].isoformat() if m[5] else None,
+            } for m in cur.fetchall()]
+
+            # 5. Build ownership proof
+            ownership_proof = {
+                'creator_id':       user_id,
+                'submission_id':    submission_id,
+                'title':            title,
+                'content_type':     content_type,
+                'cert_id':          cert_id,
+                'content_hash':     content_hash,
+                'submitted_at':     submitted_at.isoformat() if submitted_at else None,
+                'completed_at':     completed_at.isoformat() if completed_at else None,
+                'certification_status': sub_status,
+                'asset_identity':   {
+                    'asset_id':       asset_identity_id,
+                    'canonical_id':   str(asset[1]) if asset else None,
+                    'tamper_hash':    asset[2] if asset else None,
+                    'perceptual_hash': asset[3] if asset else None,
+                } if asset else None,
+                'agreement':        agreement_proof,
+            }
+
+            # 6. Build evidence bundle
+            evidence_bundle = {
+                'package_type':      package_type,
+                'target_platform':   target_platform,
+                'target_url':        target_url,
+                'infringing_url':    infringing_url,
+                'infringement_notes': infringement_notes,
+                'content_matches':   matches,
+                'match_count':       len(matches),
+                'generated_at':      datetime.utcnow().isoformat(),
+                'engine_version':    RIGHTS_ENGINE_VERSION,
+                'policy_version':    POLICY_REGISTRY_VERSION,
+            }
+
+            # 7. Compute package hash
+            package_payload = _canonical_json({
+                'submission_id':  submission_id,
+                'creator_id':     user_id,
+                'cert_id':        cert_id or '',
+                'content_hash':   content_hash or '',
+                'package_type':   package_type,
+                'generated_at':   evidence_bundle['generated_at'],
+            })
+            package_hash = _sha256(package_payload)
+
+            # 8. Store enforcement package
+            cur.execute("""
+                INSERT INTO public.enforcement_packages (
+                    submission_id, creator_id, package_type,
+                    target_platform, target_url, infringing_url,
+                    infringement_notes, asset_identity_id, agreement_id,
+                    cert_id, ownership_proof, evidence_bundle,
+                    package_hash, status
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s::jsonb, %s::jsonb, %s, 'ready'
+                )
+                RETURNING id, created_at
+            """, (
+                submission_id, user_id, package_type,
+                target_platform, target_url, infringing_url,
+                infringement_notes, asset_identity_id, agreement_id,
+                cert_id,
+                json.dumps(ownership_proof),
+                json.dumps(evidence_bundle),
+                package_hash,
+            ))
+            pkg_row = cur.fetchone()
+            package_id, created_at = pkg_row
+
+            # 9. Log enforcement event
+            cur.execute("""
+                INSERT INTO public.enforcement_events
+                    (package_id, event_type, actor_id, notes)
+                VALUES (%s, 'package_created', %s, %s)
+            """, (str(package_id), user_id,
+                  f'{package_type} package created for {title or submission_id}'))
+
+            conn.commit()
+
+            log_info('enforcement', 'package_created',
+                     package_id=str(package_id),
+                     submission_id=submission_id,
+                     package_type=package_type)
+
+            return jsonify({
+                'package_id':     str(package_id),
+                'package_hash':   package_hash,
+                'package_type':   package_type,
+                'status':         'ready',
+                'cert_id':        cert_id,
+                'submission_id':  submission_id,
+                'title':          title,
+                'ownership_proof': ownership_proof,
+                'evidence_bundle': evidence_bundle,
+                'created_at':     created_at.isoformat(),
+            }), 201
+
+    except Exception as e:
+        log_error('enforcement', 'package_create_failed', error=str(e))
+        return jsonify({'error': 'Evidence package creation failed',
+                        'detail': str(e)}), 500
+
+
+@app.route('/api/enforcement/<package_id>', methods=['GET'])
+def get_enforcement_package(package_id):
+    """Retrieve an enforcement package by ID."""
+    claims, err = _require_auth(request)
+    if err: return err
+    user_id = claims.get('sub', '')
+
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT id, submission_id, package_type, status,
+                       target_platform, target_url, infringing_url,
+                       cert_id, ownership_proof, evidence_bundle,
+                       package_hash, created_at, submitted_at,
+                       resolved_at, resolution_notes
+                FROM public.enforcement_packages
+                WHERE id = %s AND creator_id = %s
+            """, (package_id, user_id))
+            pkg = cur.fetchone()
+            if not pkg:
+                return jsonify({'error': 'Package not found'}), 404
+
+            # Get events
+            cur.execute("""
+                SELECT event_type, notes, created_at
+                FROM public.enforcement_events
+                WHERE package_id = %s
+                ORDER BY created_at ASC
+            """, (package_id,))
+            events = [{
+                'event_type': e[0],
+                'notes':      e[1],
+                'created_at': e[2].isoformat(),
+            } for e in cur.fetchall()]
+
+            return jsonify({
+                'package_id':      str(pkg[0]),
+                'submission_id':   str(pkg[1]),
+                'package_type':    pkg[2],
+                'status':          pkg[3],
+                'target_platform': pkg[4],
+                'target_url':      pkg[5],
+                'infringing_url':  pkg[6],
+                'cert_id':         pkg[7],
+                'ownership_proof': pkg[8],
+                'evidence_bundle': pkg[9],
+                'package_hash':    pkg[10],
+                'created_at':      pkg[11].isoformat(),
+                'submitted_at':    pkg[12].isoformat() if pkg[12] else None,
+                'resolved_at':     pkg[13].isoformat() if pkg[13] else None,
+                'resolution_notes': pkg[14],
+                'events':          events,
+            })
+
+    except Exception as e:
+        log_error('enforcement', 'get_package_failed', error=str(e))
+        return jsonify({'error': 'Failed to retrieve package'}), 500
+
+
+@app.route('/api/enforcement/<package_id>/submit', methods=['POST'])
+def submit_enforcement_package(package_id):
+    """Mark enforcement package as submitted to a platform."""
+    claims, err = _require_auth(request)
+    if err: return err
+    user_id = claims.get('sub', '')
+    data    = request.get_json(force=True) or {}
+    notes   = data.get('notes', '')
+
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                UPDATE public.enforcement_packages
+                SET status = 'submitted', submitted_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = %s AND creator_id = %s AND status = 'ready'
+                RETURNING id
+            """, (package_id, user_id))
+            if not cur.fetchone():
+                return jsonify({'error': 'Package not found or not in ready state'}), 404
+
+            cur.execute("""
+                INSERT INTO public.enforcement_events
+                    (package_id, event_type, actor_id, notes)
+                VALUES (%s, 'package_submitted', %s, %s)
+            """, (package_id, user_id, notes or 'Submitted to platform'))
+
+            conn.commit()
+            return jsonify({
+                'package_id': package_id,
+                'status':     'submitted',
+            })
+
+    except Exception as e:
+        log_error('enforcement', 'submit_failed', error=str(e))
+        return jsonify({'error': 'Submission failed'}), 500
+
+
+@app.route('/api/enforcement/list', methods=['GET'])
+def list_enforcement_packages():
+    """List all enforcement packages for the authenticated creator."""
+    claims, err = _require_auth(request)
+    if err: return err
+    user_id = claims.get('sub', '')
+
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT ep.id, ep.submission_id, ep.package_type,
+                       ep.status, ep.target_platform, ep.cert_id,
+                       ep.package_hash, ep.created_at, ep.submitted_at,
+                       s.title
+                FROM public.enforcement_packages ep
+                LEFT JOIN public.submissions s
+                    ON s.id = ep.submission_id
+                WHERE ep.creator_id = %s
+                ORDER BY ep.created_at DESC
+                LIMIT 100
+            """, (user_id,))
+            packages = [{
+                'package_id':      str(p[0]),
+                'submission_id':   str(p[1]),
+                'package_type':    p[2],
+                'status':          p[3],
+                'target_platform': p[4],
+                'cert_id':         p[5],
+                'package_hash':    p[6],
+                'created_at':      p[7].isoformat(),
+                'submitted_at':    p[8].isoformat() if p[8] else None,
+                'title':           p[9],
+            } for p in cur.fetchall()]
+
+            return jsonify({'packages': packages, 'total': len(packages)})
+
+    except Exception as e:
+        log_error('enforcement', 'list_failed', error=str(e))
+        return jsonify({'error': 'Failed to list packages'}), 500
+
+
+# ══════════════════════════════════════════════════════════════════
 # PHASE 2 — ASSET IDENTITY LAYER v1
 # Canonical asset identity: links submission → fingerprints → ownership → cert
 # ══════════════════════════════════════════════════════════════════
