@@ -2735,14 +2735,15 @@ def get_ownership_proof(asset_id):
              agreement_id, tamper_hash, content_type,
              origin_ts, ownership_snapshot, registered_at) = asset
 
-            # Extract owners from snapshot
+            # Extract owners from snapshot — redact PII for public endpoint
             owners = []
             if ownership_snapshot and 'participants' in ownership_snapshot:
                 owners = [{
-                    'email':         p.get('email'),
+                    'owner_id':      p.get('user_id'),
                     'role':          p.get('role'),
                     'ownership_pct': p.get('ownership_pct'),
                     'status':        p.get('status'),
+                    'verified_owner': p.get('status') == 'accepted',
                 } for p in ownership_snapshot['participants']]
 
             return jsonify({
@@ -2805,8 +2806,13 @@ def generate_takedown():
             if ownership_proof and 'agreement' in ownership_proof:
                 participants = ownership_proof['agreement'].get('participants', [])
                 if participants:
-                    claimant = participants[0].get('email')
-                    owners   = participants
+                    claimant = participants[0].get('email')  # kept internal only
+                    owners   = [{
+                        'owner_id':      p.get('user_id'),
+                        'role':          p.get('role'),
+                        'ownership_pct': p.get('ownership_pct'),
+                        'verified_owner': p.get('status') == 'accepted',
+                    } for p in participants]
 
             takedown_payload = {
                 'platform':         platform,
