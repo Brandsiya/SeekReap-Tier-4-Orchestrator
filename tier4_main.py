@@ -2387,6 +2387,323 @@ def list_agreements():
 
 
 # ══════════════════════════════════════════════════════════════════
+# PHASE 4 — LICENSING v1
+# License issuance, verification, AI permission controls, ledger
+# ══════════════════════════════════════════════════════════════════
+
+@app.route('/api/licenses/issue', methods=['POST'])
+def issue_license():
+    """
+    Issue a license for a certified asset.
+    Inherits rights from source agreement, allows override per field.
+    """
+    claims, err = _require_auth(request)
+    if err: return err
+    licensor_id = claims.get('sub', '')
+    data        = request.get_json(force=True) or {}
+
+    submission_id    = data.get('submission_id')
+    licensee_email   = data.get('licensee_email')
+    license_type     = data.get('license_type', 'standard')
+    territory        = data.get('territory', 'worldwide')
+    term_start       = data.get('term_start')
+    term_end         = data.get('term_end')
+    notes            = data.get('notes', '')
+
+    if not submission_id:
+        return jsonify({'error': 'submission_id required'}), 400
+
+    valid_types = ('standard','commercial','exclusive',
+                   'sync','ai_restricted','creative_commons')
+    if license_type not in valid_types:
+        return jsonify({'error': f'license_type must be one of {valid_types}'}), 400
+
+    try:
+        with db_cursor() as (conn, cur):
+            # 1. Verify submission belongs to licensor
+            cur.execute("""
+                SELECT id, title, cert_id, status
+                FROM public.submissions
+                WHERE id = %s AND creator_id = %s
+            """, (submission_id, licensor_id))
+            sub = cur.fetchone()
+            if not sub:
+                return jsonify({'error': 'Submission not found or access denied'}), 404
+            if sub[3] != 'COMPLETED':
+                return jsonify({'error': 'Only certified submissions can be licensed'}), 400
+
+            # 2. Pull rights from active agreement
+            cur.execute("""
+                SELECT id, commercial_use, derivative_works,
+                       sublicensing, ai_training_permitted,
+                       attribution_required, governing_jurisdiction
+                FROM public.coownership_agreements
+                WHERE submission_id = %s AND status = 'active'
+                LIMIT 1
+            """, (submission_id,))
+            agr = cur.fetchone()
+
+            # Rights from agreement (or defaults if no agreement)
+            commercial_use   = data.get('commercial_use',
+                                        agr[1] if agr else False)
+            derivative_works = data.get('derivative_works',
+                                        agr[2] if agr else False)
+            sublicensing     = data.get('sublicensing',
+                                        agr[3] if agr else False)
+            ai_training      = data.get('ai_training',
+                                        agr[4] if agr else False)
+            attribution_req  = data.get('attribution_required',
+                                        agr[5] if agr else True)
+            source_agr_id    = str(agr[0]) if agr else None
+
+            # 3. Get asset identity
+            cur.execute("""
+                SELECT id FROM public.asset_identities
+                WHERE submission_id = %s LIMIT 1
+            """, (submission_id,))
+            asset = cur.fetchone()
+            asset_identity_id = str(asset[0]) if asset else None
+
+            # 4. Compute license hash
+            license_payload = _canonical_json({
+                'submission_id':   submission_id,
+                'licensor_id':     licensor_id,
+                'licensee_email':  licensee_email or '',
+                'license_type':    license_type,
+                'commercial_use':  commercial_use,
+                'derivative_works': derivative_works,
+                'sublicensing':    sublicensing,
+                'ai_training':     ai_training,
+                'territory':       territory,
+                'term_start':      term_start or '',
+                'term_end':        term_end or '',
+                'cert_id':         sub[2] or '',
+            })
+            license_hash = _sha256(license_payload)
+
+            # 5. Insert license
+            cur.execute("""
+                INSERT INTO public.license_agreements (
+                    submission_id, asset_identity_id, licensor_id,
+                    licensee_email, license_type, commercial_use,
+                    derivative_works, sublicensing, ai_training,
+                    attribution_required, territory, term_start,
+                    term_end, status, license_hash,
+                    source_agreement_id, notes, activated_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, 'active', %s, %s, %s, NOW()
+                )
+                RETURNING id, created_at, activated_at
+            """, (
+                submission_id, asset_identity_id, licensor_id,
+                licensee_email, license_type, commercial_use,
+                derivative_works, sublicensing, ai_training,
+                attribution_req, territory,
+                term_start, term_end,
+                license_hash, source_agr_id, notes,
+            ))
+            lic = cur.fetchone()
+            license_id, created_at, activated_at = lic
+
+            # 6. Log license event
+            cur.execute("""
+                INSERT INTO public.license_events
+                    (license_id, event_type, actor_id, notes)
+                VALUES (%s, 'issued', %s, %s)
+            """, (str(license_id), licensor_id,
+                  f'License issued for {sub[1] or submission_id}'))
+            cur.execute("""
+                INSERT INTO public.license_events
+                    (license_id, event_type, actor_id, notes)
+                VALUES (%s, 'activated', %s, %s)
+            """, (str(license_id), licensor_id, 'Auto-activated on issuance'))
+
+            conn.commit()
+
+            log_info('licensing', 'license_issued',
+                     license_id=str(license_id),
+                     submission_id=submission_id,
+                     license_type=license_type)
+
+            return jsonify({
+                'license_id':       str(license_id),
+                'license_hash':     license_hash,
+                'license_type':     license_type,
+                'status':           'active',
+                'submission_id':    submission_id,
+                'cert_id':          sub[2],
+                'licensor_id':      licensor_id,
+                'licensee_email':   licensee_email,
+                'rights': {
+                    'commercial_use':     commercial_use,
+                    'derivative_works':   derivative_works,
+                    'sublicensing':       sublicensing,
+                    'ai_training':        ai_training,
+                    'attribution_required': attribution_req,
+                    'territory':          territory,
+                    'term_start':         term_start,
+                    'term_end':           term_end,
+                },
+                'created_at':    created_at.isoformat(),
+                'activated_at':  activated_at.isoformat(),
+            }), 201
+
+    except Exception as e:
+        log_error('licensing', 'issue_failed', error=str(e))
+        return jsonify({'error': 'License issuance failed',
+                        'detail': str(e)}), 500
+
+
+@app.route('/api/licenses/verify/<license_id>', methods=['GET'])
+def verify_license(license_id):
+    """
+    Public license verification endpoint.
+    Returns license validity without exposing PII.
+    """
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT
+                    la.id, la.license_type, la.status,
+                    la.commercial_use, la.derivative_works,
+                    la.sublicensing, la.ai_training,
+                    la.attribution_required, la.territory,
+                    la.term_start, la.term_end,
+                    la.license_hash, la.activated_at,
+                    la.terminated_at,
+                    ai.canonical_id, ai.cert_id,
+                    s.title, s.content_type
+                FROM public.license_agreements la
+                LEFT JOIN public.asset_identities ai
+                    ON ai.id = la.asset_identity_id
+                LEFT JOIN public.submissions s
+                    ON s.id = la.submission_id
+                WHERE la.id::text = %s
+                LIMIT 1
+            """, (license_id,))
+            lic = cur.fetchone()
+            if not lic:
+                return jsonify({'valid': False,
+                                'error': 'License not found'}), 404
+
+            now = datetime.utcnow()
+            is_active = lic[2] == 'active'
+            not_expired = (lic[10] is None or
+                          lic[10].replace(tzinfo=None) > now)
+            valid = is_active and not_expired
+
+            return jsonify({
+                'valid':              valid,
+                'license_id':         str(lic[0]),
+                'license_type':       lic[1],
+                'status':             lic[2],
+                'rights': {
+                    'commercial_use':     lic[3],
+                    'derivative_works':   lic[4],
+                    'sublicensing':       lic[5],
+                    'ai_training':        lic[6],
+                    'attribution_required': lic[7],
+                    'territory':          lic[8],
+                    'term_start':         lic[9].isoformat() if lic[9] else None,
+                    'term_end':           lic[10].isoformat() if lic[10] else None,
+                },
+                'license_hash':       lic[11],
+                'activated_at':       lic[12].isoformat() if lic[12] else None,
+                'terminated_at':      lic[13].isoformat() if lic[13] else None,
+                'canonical_id':       str(lic[14]) if lic[14] else None,
+                'cert_id':            lic[15],
+                'title':              lic[16],
+                'content_type':       lic[17],
+            })
+
+    except Exception as e:
+        log_error('licensing', 'verify_failed', error=str(e))
+        return jsonify({'error': 'License verification failed'}), 500
+
+
+@app.route('/api/licenses/<license_id>/revoke', methods=['POST'])
+def revoke_license(license_id):
+    """Revoke an active license."""
+    claims, err = _require_auth(request)
+    if err: return err
+    licensor_id = claims.get('sub', '')
+    data        = request.get_json(force=True) or {}
+    reason      = data.get('reason', 'licensor_initiated')
+
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                UPDATE public.license_agreements
+                SET status = 'revoked', terminated_at = NOW()
+                WHERE id = %s AND licensor_id = %s
+                  AND status = 'active'
+                RETURNING id
+            """, (license_id, licensor_id))
+            if not cur.fetchone():
+                return jsonify({'error': 'License not found or not revocable'}), 404
+
+            cur.execute("""
+                INSERT INTO public.license_events
+                    (license_id, event_type, actor_id, notes)
+                VALUES (%s, 'revoked', %s, %s)
+            """, (license_id, licensor_id, reason))
+
+            conn.commit()
+            return jsonify({'license_id': license_id, 'status': 'revoked'})
+
+    except Exception as e:
+        log_error('licensing', 'revoke_failed', error=str(e))
+        return jsonify({'error': 'License revocation failed'}), 500
+
+
+@app.route('/api/licenses/list', methods=['GET'])
+def list_licenses():
+    """List all licenses issued by the authenticated creator."""
+    claims, err = _require_auth(request)
+    if err: return err
+    licensor_id = claims.get('sub', '')
+
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT la.id, la.license_type, la.status,
+                       la.licensee_email, la.territory,
+                       la.term_start, la.term_end,
+                       la.license_hash, la.created_at,
+                       la.commercial_use, la.ai_training,
+                       s.title, la.submission_id
+                FROM public.license_agreements la
+                LEFT JOIN public.submissions s
+                    ON s.id = la.submission_id
+                WHERE la.licensor_id = %s
+                ORDER BY la.created_at DESC
+                LIMIT 100
+            """, (licensor_id,))
+            licenses = [{
+                'license_id':     str(l[0]),
+                'license_type':   l[1],
+                'status':         l[2],
+                'licensee_email': l[3],
+                'territory':      l[4],
+                'term_start':     l[5].isoformat() if l[5] else None,
+                'term_end':       l[6].isoformat() if l[6] else None,
+                'license_hash':   l[7],
+                'created_at':     l[8].isoformat(),
+                'commercial_use': l[9],
+                'ai_training':    l[10],
+                'title':          l[11],
+                'submission_id':  str(l[12]),
+            } for l in cur.fetchall()]
+
+            return jsonify({'licenses': licenses, 'total': len(licenses)})
+
+    except Exception as e:
+        log_error('licensing', 'list_failed', error=str(e))
+        return jsonify({'error': 'Failed to list licenses'}), 500
+
+
+# ══════════════════════════════════════════════════════════════════
 # PHASE 3 — ENFORCEMENT TOOLING v1
 # Evidence packages, takedown generation, enforcement tracking
 # ══════════════════════════════════════════════════════════════════
