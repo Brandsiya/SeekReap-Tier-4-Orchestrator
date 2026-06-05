@@ -2738,7 +2738,7 @@ def get_my_earnings():
 
     except Exception as e:
         log_error('revenue', 'earnings_failed', error=str(e))
-        return jsonify({'error': 'Earnings lookup failed'}), 500
+        return jsonify({'error': 'Earnings lookup failed', 'detail': str(e)}), 500
 
 
 @app.route('/api/payouts/me', methods=['GET'])
