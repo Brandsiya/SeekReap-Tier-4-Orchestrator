@@ -2387,6 +2387,428 @@ def list_agreements():
 
 
 # ══════════════════════════════════════════════════════════════════
+# PHASE 5 — MONETIZATION VISIBILITY v1
+# Revenue ledger, royalty allocation, earnings, payout traceability
+# ══════════════════════════════════════════════════════════════════
+
+@app.route('/api/revenue/record', methods=['POST'])
+def record_revenue():
+    """
+    Record a revenue event and automatically allocate across participants
+    based on royalty_pct from agreement_participants.
+    Allocation snapshot is frozen at time of recording — immutable.
+    """
+    claims, err = _require_auth(request)
+    if err: return err
+    recorded_by = claims.get('sub', '')
+    data        = request.get_json(force=True) or {}
+
+    submission_id = data.get('submission_id')
+    license_id    = data.get('license_id')
+    source_type   = data.get('source_type', 'license_fee')
+    gross_amount  = float(data.get('gross_amount', 0))
+    platform_fee  = float(data.get('platform_fee', 0))
+    processor_fee = float(data.get('processor_fee', 0))
+    tax_amount    = float(data.get('tax_amount', 0))
+    currency      = data.get('currency', 'USD')
+    notes         = data.get('notes', '')
+    source_id     = data.get('source_id')
+
+    if not submission_id:
+        return jsonify({'error': 'submission_id required'}), 400
+    if gross_amount <= 0:
+        return jsonify({'error': 'gross_amount must be positive'}), 400
+
+    net_amount = gross_amount - platform_fee - processor_fee - tax_amount
+    if net_amount < 0:
+        return jsonify({'error': 'Net amount cannot be negative'}), 400
+
+    valid_types = ('license_fee','sync_fee','streaming',
+                   'download','subscription','marketplace','manual','other')
+    if source_type not in valid_types:
+        return jsonify({'error': f'source_type must be one of {valid_types}'}), 400
+
+    try:
+        with db_cursor() as (conn, cur):
+            # 1. Verify submission exists and caller has access
+            cur.execute("""
+                SELECT id, title FROM public.submissions
+                WHERE id = %s AND creator_id = %s
+            """, (submission_id, recorded_by))
+            sub = cur.fetchone()
+            if not sub:
+                return jsonify({'error': 'Submission not found or access denied'}), 404
+
+            # 2. Get asset identity
+            cur.execute("""
+                SELECT id FROM public.asset_identities
+                WHERE submission_id = %s LIMIT 1
+            """, (submission_id,))
+            asset = cur.fetchone()
+            asset_id = str(asset[0]) if asset else None
+
+            # 3. Record revenue event
+            cur.execute("""
+                INSERT INTO public.revenue_events (
+                    asset_id, submission_id, license_id,
+                    source_type, source_id, gross_amount,
+                    platform_fee, processor_fee, tax_amount,
+                    net_amount, currency, recorded_by, notes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, created_at
+            """, (
+                asset_id, submission_id, license_id,
+                source_type, source_id, gross_amount,
+                platform_fee, processor_fee, tax_amount,
+                net_amount, currency, recorded_by, notes
+            ))
+            rev_id, created_at = cur.fetchone()
+
+            # 4. Get royalty allocations from active agreement
+            cur.execute("""
+                SELECT ap.user_id, ap.email, ap.role,
+                       ap.royalty_pct, ap.payout_address
+                FROM public.agreement_participants ap
+                JOIN public.coownership_agreements a
+                    ON a.id = ap.agreement_id
+                WHERE a.submission_id = %s
+                  AND a.status = 'active'
+                  AND ap.status = 'accepted'
+            """, (submission_id,))
+            participants = cur.fetchall()
+
+            # Fall back to creator only if no agreement
+            if not participants:
+                participants = [(recorded_by, None, 'creator',
+                                 100.0, None)]
+
+            # 5. Calculate and freeze allocation snapshot
+            allocations = []
+            total_royalty_pct = sum(float(p[3] or 0) for p in participants)
+
+            for (uid, email, role, royalty_pct, payout_addr) in participants:
+                pct = float(royalty_pct or 0)
+                # Normalize if total != 100
+                if total_royalty_pct > 0:
+                    normalized_pct = pct / total_royalty_pct * 100
+                else:
+                    normalized_pct = 0
+
+                gross_share = round(gross_amount * normalized_pct / 100, 2)
+                net_share   = round(net_amount   * normalized_pct / 100, 2)
+
+                # Compute allocation hash
+                alloc_payload = _canonical_json({
+                    'revenue_event_id': str(rev_id),
+                    'recipient_id':     str(uid),
+                    'allocation_pct':   normalized_pct,
+                    'gross_share':      gross_share,
+                    'net_share':        net_share,
+                    'currency':         currency,
+                })
+                calc_hash = _sha256(alloc_payload)
+
+                cur.execute("""
+                    INSERT INTO public.revenue_allocations (
+                        revenue_event_id, recipient_id, recipient_email,
+                        role, allocation_pct, gross_share, net_share,
+                        calculation_hash
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    str(rev_id), str(uid), email, role,
+                    normalized_pct, gross_share, net_share, calc_hash
+                ))
+                alloc_id = cur.fetchone()[0]
+
+                # Auto-create PENDING payout record
+                cur.execute("""
+                    INSERT INTO public.payouts (
+                        recipient_id, amount, currency, status,
+                        payout_address, revenue_event_id, allocation_id
+                    ) VALUES (%s, %s, %s, 'PENDING', %s, %s, %s)
+                    RETURNING id
+                """, (
+                    str(uid), net_share, currency,
+                    payout_addr, str(rev_id), str(alloc_id)
+                ))
+                payout_id = cur.fetchone()[0]
+
+                allocations.append({
+                    'allocation_id':   str(alloc_id),
+                    'recipient_id':    str(uid),
+                    'role':            role,
+                    'allocation_pct':  normalized_pct,
+                    'gross_share':     gross_share,
+                    'net_share':       net_share,
+                    'calculation_hash': calc_hash,
+                    'payout_id':       str(payout_id),
+                    'payout_status':   'PENDING',
+                })
+
+            conn.commit()
+
+            log_info('revenue', 'event_recorded',
+                     revenue_id=str(rev_id),
+                     submission_id=submission_id,
+                     gross=gross_amount,
+                     net=net_amount,
+                     allocations=len(allocations))
+
+            return jsonify({
+                'revenue_event_id': str(rev_id),
+                'submission_id':    submission_id,
+                'gross_amount':     gross_amount,
+                'net_amount':       net_amount,
+                'currency':         currency,
+                'allocations':      allocations,
+                'created_at':       created_at.isoformat(),
+            }), 201
+
+    except Exception as e:
+        log_error('revenue', 'record_failed', error=str(e))
+        return jsonify({'error': 'Revenue recording failed',
+                        'detail': str(e)}), 500
+
+
+@app.route('/api/assets/<submission_id>/revenue', methods=['GET'])
+def get_asset_revenue(submission_id):
+    """Full revenue history and allocation breakdown for an asset."""
+    claims, err = _require_auth(request)
+    if err: return err
+    user_id = claims.get('sub', '')
+
+    try:
+        with db_cursor() as (conn, cur):
+            # Verify access
+            cur.execute("""
+                SELECT id, title FROM public.submissions
+                WHERE id = %s AND creator_id = %s
+            """, (submission_id, user_id))
+            sub = cur.fetchone()
+            if not sub:
+                return jsonify({'error': 'Submission not found or access denied'}), 404
+
+            # Revenue summary
+            cur.execute("""
+                SELECT
+                    COUNT(*) AS event_count,
+                    COALESCE(SUM(gross_amount), 0) AS total_gross,
+                    COALESCE(SUM(net_amount), 0)   AS total_net,
+                    COALESCE(SUM(platform_fee), 0) AS total_fees,
+                    currency
+                FROM public.revenue_events
+                WHERE submission_id = %s
+                GROUP BY currency
+            """, (submission_id,))
+            summary_rows = cur.fetchall()
+            summary = [{
+                'event_count': r[0],
+                'total_gross': float(r[1]),
+                'total_net':   float(r[2]),
+                'total_fees':  float(r[3]),
+                'currency':    r[4],
+            } for r in summary_rows]
+
+            # Revenue events with allocations
+            cur.execute("""
+                SELECT re.id, re.source_type, re.gross_amount,
+                       re.net_amount, re.currency, re.created_at,
+                       re.notes
+                FROM public.revenue_events re
+                WHERE re.submission_id = %s
+                ORDER BY re.created_at DESC
+                LIMIT 50
+            """, (submission_id,))
+            events = []
+            for ev in cur.fetchall():
+                cur.execute("""
+                    SELECT recipient_id, role, allocation_pct,
+                           gross_share, net_share, payout_id
+                    FROM public.revenue_allocations
+                    WHERE revenue_event_id = %s
+                """, (str(ev[0]),))
+                allocs = [{
+                    'recipient_id':  str(a[0]),
+                    'role':          a[1],
+                    'allocation_pct': float(a[2]),
+                    'gross_share':   float(a[3]),
+                    'net_share':     float(a[4]),
+                    'payout_id':     str(a[5]) if a[5] else None,
+                } for a in cur.fetchall()]
+                events.append({
+                    'revenue_event_id': str(ev[0]),
+                    'source_type':      ev[1],
+                    'gross_amount':     float(ev[2]),
+                    'net_amount':       float(ev[3]),
+                    'currency':         ev[4],
+                    'created_at':       ev[5].isoformat(),
+                    'notes':            ev[6],
+                    'allocations':      allocs,
+                })
+
+            return jsonify({
+                'submission_id': submission_id,
+                'title':         sub[1],
+                'summary':       summary,
+                'events':        events,
+                'total_events':  len(events),
+            })
+
+    except Exception as e:
+        log_error('revenue', 'asset_revenue_failed', error=str(e))
+        return jsonify({'error': 'Revenue lookup failed'}), 500
+
+
+@app.route('/api/earnings/me', methods=['GET'])
+def get_my_earnings():
+    """Creator earnings dashboard — total earned, pending, paid."""
+    claims, err = _require_auth(request)
+    if err: return err
+    user_id = claims.get('sub', '')
+
+    try:
+        with db_cursor() as (conn, cur):
+            # Total allocations for this creator
+            cur.execute("""
+                SELECT
+                    COALESCE(SUM(ra.net_share), 0) AS total_earned,
+                    ra.currency
+                FROM public.revenue_allocations ra
+                JOIN public.revenue_events re
+                    ON re.id = ra.revenue_event_id
+                WHERE ra.recipient_id = %s
+                GROUP BY ra.currency
+            """, (user_id,))
+            earned_rows = cur.fetchall()
+
+            # Pending payouts
+            cur.execute("""
+                SELECT COALESCE(SUM(amount), 0), currency
+                FROM public.payouts
+                WHERE recipient_id = %s AND status = 'PENDING'
+                GROUP BY currency
+            """, (user_id,))
+            pending_rows = cur.fetchall()
+
+            # Paid payouts
+            cur.execute("""
+                SELECT COALESCE(SUM(amount), 0), currency
+                FROM public.payouts
+                WHERE recipient_id = %s AND status = 'PAID'
+                GROUP BY currency
+            """, (user_id,))
+            paid_rows = cur.fetchall()
+
+            # Per-asset breakdown
+            cur.execute("""
+                SELECT
+                    re.submission_id,
+                    s.title,
+                    COALESCE(SUM(ra.gross_share), 0) AS gross,
+                    COALESCE(SUM(ra.net_share), 0)   AS net,
+                    COUNT(DISTINCT re.id)             AS event_count,
+                    ra.currency
+                FROM public.revenue_allocations ra
+                JOIN public.revenue_events re ON re.id = ra.revenue_event_id
+                LEFT JOIN public.submissions s ON s.id = re.submission_id
+                WHERE ra.recipient_id = %s
+                GROUP BY re.submission_id, s.title, ra.currency
+                ORDER BY net DESC
+            """, (user_id,))
+            assets = [{
+                'submission_id': str(r[0]),
+                'title':         r[1],
+                'gross_earned':  float(r[2]),
+                'net_earned':    float(r[3]),
+                'event_count':   r[4],
+                'currency':      r[5],
+            } for r in cur.fetchall()]
+
+            def _to_dict(rows):
+                return {r[1]: float(r[0]) for r in rows} if rows else {}
+
+            return jsonify({
+                'creator_id':   user_id,
+                'total_earned': _to_dict(earned_rows),
+                'pending':      _to_dict(pending_rows),
+                'paid':         _to_dict(paid_rows),
+                'assets':       assets,
+            })
+
+    except Exception as e:
+        log_error('revenue', 'earnings_failed', error=str(e))
+        return jsonify({'error': 'Earnings lookup failed'}), 500
+
+
+@app.route('/api/payouts/me', methods=['GET'])
+def get_my_payouts():
+    """List all payouts for the authenticated creator with traceability."""
+    claims, err = _require_auth(request)
+    if err: return err
+    user_id = claims.get('sub', '')
+
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT
+                    p.id, p.amount, p.currency, p.status,
+                    p.gateway, p.transfer_ref,
+                    p.revenue_event_id, p.allocation_id,
+                    p.created_at, p.paid_at,
+                    re.source_type, re.submission_id,
+                    s.title
+                FROM public.payouts p
+                LEFT JOIN public.revenue_events re
+                    ON re.id = p.revenue_event_id
+                LEFT JOIN public.submissions s
+                    ON s.id = re.submission_id
+                WHERE p.recipient_id = %s
+                ORDER BY p.created_at DESC
+                LIMIT 100
+            """, (user_id,))
+            payouts = [{
+                'payout_id':        str(p[0]),
+                'amount':           float(p[1]),
+                'currency':         p[2],
+                'status':           p[3],
+                'gateway':          p[4],
+                'transfer_ref':     p[5],
+                'revenue_event_id': str(p[6]) if p[6] else None,
+                'allocation_id':    str(p[7]) if p[7] else None,
+                'created_at':       p[8].isoformat(),
+                'paid_at':          p[9].isoformat() if p[9] else None,
+                'source_type':      p[10],
+                'submission_id':    str(p[11]) if p[11] else None,
+                'title':            p[12],
+            } for p in cur.fetchall()]
+
+            # Summary
+            cur.execute("""
+                SELECT status, COUNT(*), COALESCE(SUM(amount),0), currency
+                FROM public.payouts
+                WHERE recipient_id = %s
+                GROUP BY status, currency
+            """, (user_id,))
+            summary = [{
+                'status':   r[0],
+                'count':    r[1],
+                'total':    float(r[2]),
+                'currency': r[3],
+            } for r in cur.fetchall()]
+
+            return jsonify({
+                'payouts': payouts,
+                'summary': summary,
+                'total':   len(payouts),
+            })
+
+    except Exception as e:
+        log_error('revenue', 'payouts_failed', error=str(e))
+        return jsonify({'error': 'Payouts lookup failed'}), 500
+
+
+# ══════════════════════════════════════════════════════════════════
 # PHASE 4 — LICENSING v1
 # License issuance, verification, AI permission controls, ledger
 # ══════════════════════════════════════════════════════════════════
