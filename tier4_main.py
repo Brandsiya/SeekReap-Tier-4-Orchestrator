@@ -2657,6 +2657,97 @@ def revoke_license(license_id):
         return jsonify({'error': 'License revocation failed'}), 500
 
 
+@app.route('/api/licenses/<license_id>/record', methods=['GET'])
+def get_license_record(license_id):
+    """
+    Human-readable license record — JSON summary suitable for display,
+    PDF generation, or export. No PII exposed.
+    """
+    try:
+        with db_cursor() as (conn, cur):
+            cur.execute("""
+                SELECT
+                    la.id, la.license_type, la.status,
+                    la.commercial_use, la.derivative_works,
+                    la.sublicensing, la.ai_training,
+                    la.attribution_required, la.territory,
+                    la.term_start, la.term_end,
+                    la.license_hash, la.activated_at,
+                    la.terminated_at, la.notes,
+                    ai.canonical_id, ai.cert_id,
+                    s.title, s.content_type,
+                    la.licensor_id
+                FROM public.license_agreements la
+                LEFT JOIN public.asset_identities ai
+                    ON ai.id = la.asset_identity_id
+                LEFT JOIN public.submissions s
+                    ON s.id = la.submission_id
+                WHERE la.id::text = %s
+                LIMIT 1
+            """, (license_id,))
+            lic = cur.fetchone()
+            if not lic:
+                return jsonify({'error': 'License not found'}), 404
+
+            # Get license events for history
+            cur.execute("""
+                SELECT event_type, notes, created_at
+                FROM public.license_events
+                WHERE license_id = %s
+                ORDER BY created_at ASC
+            """, (license_id,))
+            events = [{
+                'event': e[0],
+                'notes': e[1],
+                'at':    e[2].isoformat(),
+            } for e in cur.fetchall()]
+
+            now = datetime.utcnow()
+            is_active  = lic[2] == 'active'
+            not_expired = lic[10] is None or lic[10].replace(tzinfo=None) > now
+            valid = is_active and not_expired
+
+            record = {
+                'license_id':     str(lic[0]),
+                'license_type':   lic[1].upper(),
+                'status':         lic[2].upper(),
+                'valid':          valid,
+                'asset': {
+                    'title':        lic[17],
+                    'content_type': lic[18],
+                    'canonical_id': str(lic[15]) if lic[15] else None,
+                    'cert_id':      lic[16],
+                },
+                'permissions': {
+                    'commercial_use':      lic[3],
+                    'derivative_works':    lic[4],
+                    'sublicensing':        lic[5],
+                    'ai_training':         lic[6],
+                    'attribution_required': lic[7],
+                },
+                'territory':      lic[8],
+                'term': {
+                    'start': lic[9].isoformat() if lic[9] else 'Perpetual',
+                    'end':   lic[10].isoformat() if lic[10] else 'Perpetual',
+                },
+                'integrity': {
+                    'license_hash':   lic[11],
+                    'activated_at':   lic[12].isoformat() if lic[12] else None,
+                    'terminated_at':  lic[13].isoformat() if lic[13] else None,
+                },
+                'notes':  lic[14],
+                'events': events,
+                'generated_at': datetime.utcnow().isoformat(),
+                'issuer': 'SeekReap Rights Engine v1',
+            }
+
+            return jsonify(record)
+
+    except Exception as e:
+        log_error('licensing', 'record_failed', error=str(e))
+        return jsonify({'error': 'License record retrieval failed'}), 500
+
+
 @app.route('/api/licenses/list', methods=['GET'])
 def list_licenses():
     """List all licenses issued by the authenticated creator."""
