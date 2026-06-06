@@ -2673,12 +2673,12 @@ def get_my_earnings():
             cur.execute("""
                 SELECT
                     COALESCE(SUM(ra.net_share), 0) AS total_earned,
-                    ra.currency
+                    re.currency
                 FROM public.revenue_allocations ra
                 JOIN public.revenue_events re
                     ON re.id = ra.revenue_event_id
                 WHERE ra.recipient_id = %s
-                GROUP BY ra.currency
+                GROUP BY re.currency
             """, (user_id,))
             earned_rows = cur.fetchall()
 
@@ -2708,12 +2708,12 @@ def get_my_earnings():
                     COALESCE(SUM(ra.gross_share), 0) AS gross,
                     COALESCE(SUM(ra.net_share), 0)   AS net,
                     COUNT(DISTINCT re.id)             AS event_count,
-                    ra.currency
+                    re.currency
                 FROM public.revenue_allocations ra
                 JOIN public.revenue_events re ON re.id = ra.revenue_event_id
                 LEFT JOIN public.submissions s ON s.id = re.submission_id
                 WHERE ra.recipient_id = %s
-                GROUP BY re.submission_id, s.title, ra.currency
+                GROUP BY re.submission_id, s.title, re.currency
                 ORDER BY net DESC
             """, (user_id,))
             assets = [{
