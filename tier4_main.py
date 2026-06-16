@@ -14,6 +14,7 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
 
 CORS(app, origins=[
+    "https://seekreap-frontend.onrender.com",
     "https://seekreap-tier-6-frontend.fly.dev",
     "https://brandsiya.github.io",
     "http://localhost:3000",
