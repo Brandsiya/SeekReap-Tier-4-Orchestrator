@@ -2852,7 +2852,7 @@ def issue_license():
             sub = cur.fetchone()
             if not sub:
                 return jsonify({'error': 'Submission not found or access denied'}), 404
-            if sub[3] != 'COMPLETED':
+            if (sub[3] or '').upper() != 'COMPLETED':
                 return jsonify({'error': 'Only certified submissions can be licensed'}), 400
 
             # 2. Pull rights from active agreement
@@ -3977,7 +3977,9 @@ def verify_certificate_public():
             cur.execute("""
                 SELECT s.id, s.title, s.cert_id, s.certificate_id,
                        s.status, s.submitted_at, s.completed_at,
-                       s.content_type, s.creator_id
+                       s.content_type, s.creator_id, s.content_hash,
+                       s.fingerprint_data IS NOT NULL AS has_fingerprint,
+                       s.work_type, s.plan
                 FROM public.submissions s
                 WHERE s.cert_id = %s
                    OR s.certificate_id = %s
@@ -3991,7 +3993,8 @@ def verify_certificate_public():
 
             (sub_id, title, cert_id_val, certificate_id,
              status, submitted_at, completed_at,
-             content_type, creator_id) = row
+             content_type, creator_id, content_hash,
+             has_fingerprint, work_type, plan) = row
 
             # Also get agreement if exists
             cur.execute("""
@@ -4002,18 +4005,24 @@ def verify_certificate_public():
             """, (str(sub_id),))
             agr = cur.fetchone()
 
+            is_completed = (status or '').upper() == 'COMPLETED'
+
             return jsonify({
-                'valid':        status == 'COMPLETED',
-                'chain_valid':  status == 'COMPLETED',
-                'cert_id':      cert_id_val or certificate_id or cert_id,
-                'submission_id': str(sub_id),
-                'title':        title or 'Certified Work',
-                'content_type': content_type,
-                'status':       status,
-                'submitted_at': submitted_at.isoformat() if submitted_at else None,
-                'activated_at': completed_at.isoformat() if completed_at else None,
-                'agreement_id': str(agr[0]) if agr else None,
-                'final_hash':   agr[3] if agr else None,
+                'valid':          is_completed,
+                'chain_valid':    is_completed,
+                'cert_id':        cert_id_val or certificate_id or cert_id,
+                'submission_id':  str(sub_id),
+                'title':          title or 'Certified Work',
+                'content_type':   content_type,
+                'work_type':      work_type,
+                'plan':           plan,
+                'status':         status,
+                'content_hash':   content_hash,
+                'has_fingerprint': bool(has_fingerprint),
+                'submitted_at':   submitted_at.isoformat() if submitted_at else None,
+                'activated_at':   completed_at.isoformat() if completed_at else None,
+                'agreement_id':   str(agr[0]) if agr else None,
+                'final_hash':     agr[3] if agr else (content_hash or None),
             })
 
     except Exception as e:
