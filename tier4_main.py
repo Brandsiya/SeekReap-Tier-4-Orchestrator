@@ -1283,7 +1283,7 @@ PAYFAST_MERCHANT_ID  = os.environ.get("PAYFAST_MERCHANT_ID", "")
 PAYFAST_MERCHANT_KEY = os.environ.get("PAYFAST_MERCHANT_KEY", "")
 PAYFAST_PASSPHRASE   = os.environ.get("PAYFAST_PASSPHRASE", "")
 FRONTEND_URL         = os.environ.get("FRONTEND_URL", "https://seekreap-frontend.onrender.com")
-TIER4_INTERNAL       = os.environ.get("TIER4_INTERNAL", "https://seekreap-tier-4-dev.fly.dev")
+TIER4_INTERNAL       = os.environ.get("TIER4_INTERNAL", "https://seekreap-tier-4-orchestrator-1.onrender.com")
 
 PLAN_AMOUNTS = {"payg": 199, "creator": 999, "studio": 2999}
 
