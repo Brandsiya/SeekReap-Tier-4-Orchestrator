@@ -15,7 +15,7 @@ app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
 
 CORS(app, origins=[
     "https://seekreap-frontend.onrender.com",
-    "https://seekreap-tier-6-frontend.fly.dev",
+    "https://seekreap-frontend.onrender.com",
     "https://brandsiya.github.io",
     "http://localhost:3000",
     "http://localhost:8080",
@@ -4537,7 +4537,7 @@ def verify_agreement_chain(agreement_id):
 # pdf_hash       = tamper detection only (not legal proof)
 # ══════════════════════════════════════════════════════════════════
 
-VERIFY_BASE_URL = os.environ.get('FRONTEND_URL', 'https://seekreap-tier-6-frontend.fly.dev')
+VERIFY_BASE_URL = os.environ.get('FRONTEND_URL', 'https://seekreap-frontend.onrender.com')
 
 @app.route('/api/agreements/<agreement_id>/generate-pdf', methods=['POST'])
 def generate_agreement_pdf(agreement_id):
