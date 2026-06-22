@@ -1502,27 +1502,31 @@ def init_paystack(payment_id, data):
 
 def init_payfast(payment_id, data):
     import urllib.parse
-    fields = {
-        "merchant_id":   PAYFAST_MERCHANT_ID,
-        "merchant_key":  PAYFAST_MERCHANT_KEY,
-        "return_url":    FRONTEND_URL + "/payment_success.html",
-        "cancel_url":    FRONTEND_URL + "/certification_portal.html",
-        "notify_url":    TIER4_INTERNAL + "/api/payments/webhook/payfast",
-        "m_payment_id":  str(payment_id),
-        "amount":        f"{data['amount'] / 100:.2f}",
-        "item_name":     f"SeekReap {data['plan'].title()} Plan",
-        "email_address": data["email"],
-    }
+    from collections import OrderedDict
+    # PayFast requires fields in this exact order for signature
+    fields = OrderedDict([
+        ("merchant_id",   PAYFAST_MERCHANT_ID),
+        ("merchant_key",  PAYFAST_MERCHANT_KEY),
+        ("return_url",    FRONTEND_URL + "/payment_success.html"),
+        ("cancel_url",    FRONTEND_URL + "/certification_portal.html"),
+        ("notify_url",    TIER4_INTERNAL + "/api/payments/webhook/payfast"),
+        ("m_payment_id",  str(payment_id)),
+        ("amount",        f"{data['amount'] / 100:.2f}"),
+        ("item_name",     f"SeekReap {data['plan'].title()} Plan"),
+        ("email_address", data["email"]),
+    ])
+    # Build signature string — only non-empty values, in field order
     sig_str = "&".join(
-        f"{k}={urllib.parse.quote_plus(str(v))}" for k, v in fields.items() if v
+        f"{k}={urllib.parse.quote_plus(str(v))}"
+        for k, v in fields.items() if v is not None and str(v).strip()
     )
     if PAYFAST_PASSPHRASE:
-        sig_str += f"&passphrase={urllib.parse.quote_plus(PAYFAST_PASSPHRASE)}"
-    fields["signature"] = hashlib.md5(sig_str.encode()).hexdigest()
+        sig_str += f"&passphrase={urllib.parse.quote_plus(PAYFAST_PASSPHRASE.strip())}"
+    fields["signature"] = hashlib.md5(sig_str.encode("utf-8")).hexdigest()
     return jsonify({
         "gateway":    "payfast",
-        "action_url": "https://www.payfast.co.za/eng/process",
-        "fields":     fields,
+        "action_url": "https://sandbox.payfast.co.za/eng/process",
+        "fields":     dict(fields),
     })
 
 
