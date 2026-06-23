@@ -1503,7 +1503,8 @@ def init_paystack(payment_id, data):
 def init_payfast(payment_id, data):
     import urllib.parse
     from collections import OrderedDict
-    # PayFast requires fields in this exact order for signature
+
+    # PayFast requires fields in this exact order
     fields = OrderedDict([
         ("merchant_id",   PAYFAST_MERCHANT_ID),
         ("merchant_key",  PAYFAST_MERCHANT_KEY),
@@ -1515,18 +1516,28 @@ def init_payfast(payment_id, data):
         ("item_name",     f"SeekReap {data['plan'].title()} Plan"),
         ("email_address", data["email"]),
     ])
-    # Build signature string — only non-empty values, in field order
-    sig_str = "&".join(
-        f"{k}={urllib.parse.quote_plus(str(v))}"
-        for k, v in fields.items() if v is not None and str(v).strip()
-    )
-    if PAYFAST_PASSPHRASE:
-        sig_str += f"&passphrase={urllib.parse.quote_plus(PAYFAST_PASSPHRASE.strip())}"
-    fields["signature"] = hashlib.md5(sig_str.encode("utf-8")).hexdigest()
+
+    # Build signature — PayFast uses urlencode with quote_plus, no signature field
+    sig_parts = []
+    for k, v in fields.items():
+        sv = str(v).strip()
+        if sv:
+            sig_parts.append(f"{k}={urllib.parse.quote_plus(sv)}")
+    if PAYFAST_PASSPHRASE and PAYFAST_PASSPHRASE.strip():
+        sig_parts.append(f"passphrase={urllib.parse.quote_plus(PAYFAST_PASSPHRASE.strip())}")
+    sig_str = "&".join(sig_parts)
+    signature = hashlib.md5(sig_str.encode("utf-8")).hexdigest()
+
+    # Return fields in same order they were signed + signature last
+    result = dict(fields)
+    result["signature"] = signature
+
+    action = "https://sandbox.payfast.co.za/eng/process"
     return jsonify({
         "gateway":    "payfast",
-        "action_url": "https://sandbox.payfast.co.za/eng/process",
-        "fields":     dict(fields),
+        "action_url": action,
+        "fields":     result,
+        "field_order": list(fields.keys()) + ["signature"],
     })
 
 
