@@ -1538,6 +1538,7 @@ def init_payfast(payment_id, data):
         "action_url": action,
         "fields":     result,
         "field_order": list(fields.keys()) + ["signature"],
+        "_debug_sig_str": sig_str,
     })
 
 
