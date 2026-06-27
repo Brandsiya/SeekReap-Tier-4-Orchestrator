@@ -1452,10 +1452,10 @@ def _check_replay(event_id: str, gateway: str) -> bool:
 def select_gateway(data):
     country  = (data.get("country") or "").upper().strip()
     currency = (data.get("currency") or "ZAR").upper().strip()
-    if (country == "ZA" or currency == "ZAR") and PAYFAST_MERCHANT_ID and PAYFAST_MERCHANT_KEY:
-        return "payfast"
     if PAYSTACK_SECRET:
         return "paystack"
+    if (country == "ZA" or currency == "ZAR") and PAYFAST_MERCHANT_ID and PAYFAST_MERCHANT_KEY:
+        return "payfast"
     return None
 
 
