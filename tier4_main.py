@@ -3994,8 +3994,8 @@ def verify_certificate_public():
                 SELECT s.id, s.title, s.cert_id, s.certificate_id,
                        s.status, s.submitted_at, s.completed_at,
                        s.content_type, s.creator_id, s.content_hash,
-                       s.fingerprint_data IS NOT NULL AS has_fingerprint,
-                       s.work_type, s.plan
+                       (s.fingerprint_data IS NOT NULL AND s.fingerprint_data::text NOT LIKE '%"error"%') AS has_fingerprint,
+                       s.work_type, s.plan, s.fingerprint_data
                 FROM public.submissions s
                 WHERE s.cert_id = %s
                    OR s.certificate_id = %s
@@ -4010,7 +4010,7 @@ def verify_certificate_public():
             (sub_id, title, cert_id_val, certificate_id,
              status, submitted_at, completed_at,
              content_type, creator_id, content_hash,
-             has_fingerprint, work_type, plan) = row
+             has_fingerprint, work_type, plan, fp_data) = row
 
             # Also get agreement if exists
             cur.execute("""
@@ -4035,6 +4035,8 @@ def verify_certificate_public():
                 'status':         status,
                 'content_hash':   content_hash,
                 'has_fingerprint': bool(has_fingerprint),
+                'fingerprint_type': (fp_data.get('type') if isinstance(fp_data, dict) and 'error' not in fp_data else None),
+                'fingerprint_value': (fp_data.get('hash') or fp_data.get('fingerprint') if isinstance(fp_data, dict) and 'error' not in fp_data else None),
                 'submitted_at':   submitted_at.isoformat() if submitted_at else None,
                 'activated_at':   completed_at.isoformat() if completed_at else None,
                 'agreement_id':   str(agr[0]) if agr else None,
