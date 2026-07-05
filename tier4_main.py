@@ -543,6 +543,60 @@ def health():
     return jsonify({"status": "ok", "tier": 4})
 
 
+@app.post("/api/support/contact")
+def support_contact():
+    """Stores a support request from support.html's contact form.
+    NOTE: no outbound email/notification is wired yet — this persists
+    the ticket to the `support_tickets` table only. Run the following
+    in Supabase before using this endpoint:
+
+        CREATE TABLE IF NOT EXISTS support_tickets (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            creator_id UUID NULL,
+            email TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            message TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """
+    body  = request.get_json(force=True) or {}
+    email = _clamp_str(body.get("email"), 254).strip()
+    topic = _clamp_str(body.get("topic"), 128).strip() or "General question"
+    message = _clamp_str(body.get("message"), 5000).strip()
+
+    if not email or not _valid_email(email):
+        return jsonify({"error": "A valid email address is required"}), 400
+    if not message:
+        return jsonify({"error": "Message cannot be empty"}), 400
+
+    creator_id = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        claims = _verify_supabase_jwt(auth_header[7:].strip())
+        if claims:
+            creator_id = claims.get("sub")
+
+    try:
+        with db_cursor(RealDictCursor) as (conn, cur):
+            cur.execute("""
+                INSERT INTO support_tickets (creator_id, email, topic, message)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id, created_at
+            """, (creator_id, email, topic, message))
+            row = cur.fetchone()
+            conn.commit()
+        return jsonify({
+            "id": str(row["id"]),
+            "status": "received",
+            "message": "Your message has been received. We'll respond within 1-2 business days."
+        }), 201
+    except Exception as e:
+        log_error("support", "ticket_insert_failed", error=str(e))
+        return jsonify({"error": "Could not submit your message right now. "
+                                  "Please email support@seekreap.io directly."}), 500
+
+
 @app.post("/api/submit")
 def submit():
     claims, err = _require_auth(request)
@@ -647,6 +701,26 @@ def certify_work():
                         "qr_url":        f"/api/qrcode/{existing['cert_id']}",
                         "message":       "Certification already queued (deduplicated)",
                     }), 202
+
+            # ── FREE PLAN QUOTA ──────────────────────────────────────────
+            # Free plan = 1 certification per account, lifetime (not a
+            # recurring monthly allowance — there is no subscription/reset
+            # mechanism in this system). Paid plans (payg/creator/studio)
+            # are one-time per-certification purchases and are exempt.
+            if not internal_ok and plan == "free":
+                cur.execute("""
+                    SELECT COUNT(*) AS n FROM submissions
+                    WHERE creator_id = %s AND plan = 'free'
+                      AND status != 'failed'
+                """, (creator_uuid,))
+                free_count = cur.fetchone()["n"]
+                if free_count >= 1:
+                    return jsonify({
+                        "error": "Free plan allows 1 certification per account. "
+                                 "Upgrade to Pay-As-You-Go, Creator, or Studio to "
+                                 "certify additional works.",
+                        "code": "FREE_QUOTA_EXCEEDED"
+                    }), 403
 
             suffix      = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
             cert_id     = f"SR-{datetime.utcnow().strftime('%Y%m%d')}-{suffix}"
@@ -2011,6 +2085,57 @@ def get_payment_status(payment_id):
         if result["paid_at"]:
             result["paid_at"] = result["paid_at"].isoformat()
         return jsonify(result)
+
+
+@app.get("/api/payments/me")
+def list_my_payments():
+    """Billing history for the authenticated creator — powers the
+    Billing History view (dashboard/profile). Previously no list
+    endpoint existed; only single-payment lookup by ID was available."""
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
+    token_sub = claims.get("sub", "")
+    try:
+        token_uuid = str(uuid.UUID(token_sub))
+    except Exception:
+        token_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, token_sub))
+
+    try:
+        limit = min(max(int(request.args.get("limit", 50)), 1), 200)
+    except (TypeError, ValueError):
+        limit = 50
+
+    with db_cursor(RealDictCursor) as (conn, cur):
+        cur.execute("""
+            SELECT p.id, p.status, p.plan, p.amount, p.currency, p.gateway,
+                   p.created_at, p.paid_at, p.submission_id,
+                   s.cert_id, s.title
+            FROM payments p
+            LEFT JOIN submissions s ON s.id = p.submission_id
+            WHERE p.creator_id IN (%s, %s)
+            ORDER BY p.created_at DESC
+            LIMIT %s
+        """, (token_uuid, token_sub, limit))
+        rows = cur.fetchall()
+
+    out = []
+    for r in rows:
+        out.append({
+            "id":            str(r["id"]),
+            "status":        r["status"],
+            "plan":          r["plan"],
+            "amount":        r["amount"],
+            "currency":      r["currency"],
+            "gateway":       r["gateway"],
+            "created_at":    r["created_at"].isoformat() if r["created_at"] else None,
+            "paid_at":       r["paid_at"].isoformat() if r["paid_at"] else None,
+            "submission_id": str(r["submission_id"]) if r["submission_id"] else None,
+            "cert_id":       r.get("cert_id"),
+            "title":         r.get("title"),
+        })
+    return jsonify({"payments": out, "count": len(out)})
 
 
 # ══════════════════════════════════════════════════════════════════════════════
