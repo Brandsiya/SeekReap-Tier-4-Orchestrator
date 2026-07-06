@@ -449,6 +449,101 @@ def get_or_create_creator(conn, firebase_uid, email=None, name=None):
         return str(row["id"]) if row else new_id
 
 
+@app.get("/api/creators/me")
+def get_my_profile():
+    """Powers profile.html. name/company_name/preferences live on `creators`;
+    the richer optional fields live on `profiles` (created alongside a
+    creator's first collaboration-invite acceptance, or on first profile
+    save — see the ON CONFLICT upsert in update_my_profile below)."""
+    claims, err = _require_auth(request)
+    if err:
+        return err
+    firebase_uid = claims.get("sub", "")
+    if not firebase_uid:
+        return jsonify({"error": "Invalid session"}), 401
+
+    with db_conn() as conn:
+        creator_uuid = get_or_create_creator(conn, firebase_uid, claims.get("email"))
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id, email, name, company_name, preferences FROM creators WHERE id = %s",
+                (creator_uuid,)
+            )
+            creator = cur.fetchone() or {}
+            cur.execute(
+                "SELECT full_name, artistic_name, title, gender, country FROM profiles WHERE id = %s",
+                (creator_uuid,)
+            )
+            profile = cur.fetchone() or {}
+
+    return jsonify({
+        "id":            creator.get("id"),
+        "email":         creator.get("email"),
+        "name":          creator.get("name"),
+        "company_name":  creator.get("company_name"),
+        "preferences":   creator.get("preferences") or {},
+        "full_name":     profile.get("full_name"),
+        "artistic_name": profile.get("artistic_name"),
+        "title":         profile.get("title"),
+        "gender":        profile.get("gender"),
+        "country":       profile.get("country"),
+    })
+
+
+@app.patch("/api/creators/me")
+def update_my_profile():
+    """Partial update — only fields present in the body are touched.
+    `preferences` replaces the whole JSONB blob (profile.html always sends
+    the complete notification-prefs object, not a partial one)."""
+    claims, err = _require_auth(request)
+    if err:
+        return err
+    firebase_uid = claims.get("sub", "")
+    if not firebase_uid:
+        return jsonify({"error": "Invalid session"}), 401
+
+    body = request.get_json(force=True) or {}
+
+    def clamp(key, maxlen):
+        return _clamp_str(body[key], maxlen).strip() if key in body and body[key] is not None else None
+
+    name          = clamp("name", 200)
+    company_name  = clamp("company_name", 200)
+    full_name     = clamp("full_name", 200)
+    artistic_name = clamp("artistic_name", 200)
+    title         = clamp("title", 20)
+    gender        = clamp("gender", 40)
+    country       = clamp("country", 80)
+    preferences   = body.get("preferences") if isinstance(body.get("preferences"), dict) else None
+
+    with db_conn() as conn:
+        creator_uuid = get_or_create_creator(conn, firebase_uid, claims.get("email"))
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            sets, vals = [], []
+            if name is not None:         sets.append("name = %s");         vals.append(name)
+            if company_name is not None: sets.append("company_name = %s"); vals.append(company_name)
+            if preferences is not None:  sets.append("preferences = %s");  vals.append(json.dumps(preferences))
+            if sets:
+                vals.append(creator_uuid)
+                cur.execute(f"UPDATE creators SET {', '.join(sets)} WHERE id = %s", vals)
+
+            if any(v is not None for v in (full_name, artistic_name, title, gender, country)):
+                cur.execute("""
+                    INSERT INTO profiles (id, full_name, artistic_name, title, gender, country, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT (id) DO UPDATE SET
+                        full_name     = COALESCE(EXCLUDED.full_name, profiles.full_name),
+                        artistic_name = COALESCE(EXCLUDED.artistic_name, profiles.artistic_name),
+                        title         = COALESCE(EXCLUDED.title, profiles.title),
+                        gender        = COALESCE(EXCLUDED.gender, profiles.gender),
+                        country       = COALESCE(EXCLUDED.country, profiles.country),
+                        updated_at    = NOW()
+                """, (creator_uuid, full_name, artistic_name, title, gender, country))
+            conn.commit()
+
+    return jsonify({"status": "ok"})
+
+
 def insert_submission(data, creator_uuid):
     content_url  = data.get("content_url")
     content_hash = data.get("content_hash", "unknown")
