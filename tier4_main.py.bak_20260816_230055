@@ -6674,23 +6674,11 @@ PUBLIC_PROFILE_EXCLUDE = {
 }
 
 
-# Legal identity fields — no visibility toggle exists for these (unlike
-# location), so they are always owner-only regardless of profile_visibility.
-OWNER_ONLY_PROFILE_FIELDS = {
-    'legal_full_name', 'first_legal_name', 'middle_legal_name', 'last_legal_name',
-    'title', 'gender', 'date_of_birth',
-}
-
-
-def _sanitize_public_profile(row, is_owner=False):
+def _sanitize_public_profile(row):
     p = _profile_row_to_json(row)
     for k in list(p.keys()):
         if k in PUBLIC_PROFILE_EXCLUDE:
             p.pop(k, None)
-    if not is_owner:
-        for k in list(p.keys()):
-            if k in OWNER_ONLY_PROFILE_FIELDS:
-                p.pop(k, None)
     # Respect the creator's own visibility toggles for location fields
     if not p.get('show_country'):
         p.pop('country_of_residence', None)
@@ -6812,7 +6800,7 @@ def get_public_profile(profile_id):
             log_warn("profile", "trust_summary_failed", profile_id=profile_id, error=str(e))
 
     return jsonify({
-        "profile":        _sanitize_public_profile(profile, is_owner),
+        "profile":        _sanitize_public_profile(profile),
         "creative_roles": [_profile_row_to_json(r) for r in roles],
         "portfolio": {
             "sections": [_profile_row_to_json(r) for r in sections],
