@@ -63,3 +63,6 @@ render.yaml
 
 # Backup files
 tier4_main.py.backup*
+*.bak_*
+*.py.bak_*
+*.backup_*
