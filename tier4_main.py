@@ -6236,7 +6236,7 @@ USER_PROFILE_WRITABLE = [
     "physical_address_line1", "physical_address_line2", "physical_city",
     "physical_province", "physical_country", "physical_postal_code",
     "artistic_name", "banner_photo_url", "profile_photo_url", "biography",
-    "website_urls", "social_links", "country_of_residence", "province", "city",
+    "website_urls", "country_of_residence", "province", "city",
     "nationality_code", "show_location", "show_country", "show_city",
     "searchable", "profile_language_preference", "profile_timezone_preference",
     "profile_visibility", "user_notifications_preference", "marketing_opt_in",
@@ -6965,3 +6965,5 @@ def untrust_profile(profile_id):
         "trusted_by_count":     trusted_by_count,
         "is_trusted_by_viewer": False,
     })
+
+# # ══ SOCIAL_LINKS_REMOVED_V1 ══
