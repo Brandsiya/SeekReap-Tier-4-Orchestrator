@@ -23,7 +23,7 @@ CORS(app, origins=[
 
 DAILY_QUOTA = 50
 QUEUE_CAP   = 500
-VALID_PLANS = {"free", "creator", "studio", "payg"}
+VALID_PLANS = {"free", "creator", "studio", "enterprise"}
 VALID_WORK_TYPES = {"audio", "video", "image", "epub", "pdf", "code", "other"}
 
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
@@ -588,9 +588,18 @@ def insert_submission(data, creator_uuid):
         log_info("submit", "created", submission_id=submission_id, title=title)
         cur.execute("""
             INSERT INTO job_queue
-                (submission_id, creator_id, content_id, job_type, status, attempts)
-            VALUES (%s, %s, %s, %s, %s, 0) ON CONFLICT DO NOTHING
-        """, (submission_id, creator_uuid, content_url, "fingerprint", "pending"))
+                (submission_id, creator_id, content_id, job_type,
+                 status, attempts, priority)
+            VALUES (%s, %s, %s, %s, %s, 0, %s)
+            ON CONFLICT DO NOTHING
+        """, (
+            submission_id,
+            creator_uuid,
+            content_url,
+            "fingerprint",
+            "pending",
+            PLAN_PRIORITY.get("free", 1),
+        ))
         conn.commit()
 
     return submission_id, title, channel, thumbnail_url
@@ -609,6 +618,40 @@ def check_rate_limit(creator_uuid: str) -> tuple:
         if daily >= DAILY_QUOTA:
             return False, f"Daily quota reached ({daily}/{DAILY_QUOTA}). Resets in 24h."
         return True, ""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PRIORITY QUEUE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def dequeue_priority_job(cur):
+    """Claim the highest-priority pending queue job."""
+
+    cur.execute("""
+        SELECT *
+        FROM job_queue
+        WHERE status = 'pending'
+        ORDER BY priority DESC, created_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+    """)
+
+    job = cur.fetchone()
+
+    if not job:
+        return None
+
+    job_id = job["job_id"] if isinstance(job, dict) else job[0]
+
+    cur.execute("""
+        UPDATE job_queue
+        SET status = 'processing',
+            processing_started_at = NOW()
+        WHERE job_id = %s
+        RETURNING *
+    """, (job_id,))
+
+    return cur.fetchone()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -797,25 +840,141 @@ def certify_work():
                         "message":       "Certification already queued (deduplicated)",
                     }), 202
 
-            # ── FREE PLAN QUOTA ──────────────────────────────────────────
-            # Free plan = 1 certification per account, lifetime (not a
-            # recurring monthly allowance — there is no subscription/reset
-            # mechanism in this system). Paid plans (payg/creator/studio)
-            # are one-time per-certification purchases and are exempt.
-            if not internal_ok and plan == "free":
+            # ── MEMBERSHIP ENTITLEMENTS / MONTHLY CREDITS ────────────────
+            # Free: 1 certification credit/month
+            # Creator: 10 certification credits/month
+            # Studio/Enterprise: unlimited
+            #
+            # Credits reset to the plan allowance each month; they do not roll
+            # over. The update is performed atomically while holding the
+            # membership billing row lock.
+            if not internal_ok:
                 cur.execute("""
-                    SELECT COUNT(*) AS n FROM submissions
-                    WHERE creator_id = %s AND plan = 'free'
-                      AND status != 'failed'
+                    SELECT
+                        b.id,
+                        b.plan_id,
+                        b.subscription_status,
+                        b.next_billing_date,
+                        b.credits_remaining,
+                        b.lifetime_credits_used,
+                        b.updated_at,
+                        mp.plan_code,
+                        mp.monthly_credits,
+                        mp.max_certifications_per_month,
+                        mp.coownership,
+                        mp.pdf_certificate,
+                        mp.watermark
+                    FROM user_membership_billings b
+                    JOIN membership_plans mp ON mp.id = b.plan_id
+                    WHERE b.user_id = %s
+                    ORDER BY b.created_at DESC
+                    LIMIT 1
+                    FOR UPDATE OF b
                 """, (creator_uuid,))
-                free_count = cur.fetchone()["n"]
-                if free_count >= 1:
+                membership = cur.fetchone()
+
+                # No paid membership row means the user is on Free.
+                if membership:
+                    db_plan = str(membership["plan_code"] or "FREE").lower()
+                    if db_plan != plan:
+                        return jsonify({
+                            "error": "Selected plan does not match your active membership.",
+                            "code": "PLAN_MISMATCH"
+                        }), 403
+                else:
+                    db_plan = "free" if plan == "free" else plan
+
+                if db_plan != plan:
                     return jsonify({
-                        "error": "Free plan allows 1 certification per account. "
-                                 "Upgrade to Pay-As-You-Go, Creator, or Studio to "
-                                 "certify additional works.",
-                        "code": "FREE_QUOTA_EXCEEDED"
+                        "error": "Selected plan does not match your active membership.",
+                        "code": "PLAN_MISMATCH"
                     }), 403
+
+                if membership:
+                    status = str(membership["subscription_status"] or "").lower()
+                    if plan != "free" and status not in ("active", "trialing"):
+                        return jsonify({
+                            "error": "Your membership is not active.",
+                            "code": "MEMBERSHIP_INACTIVE"
+                        }), 403
+
+                    monthly_credits = membership["monthly_credits"]
+                    max_monthly = membership["max_certifications_per_month"]
+
+                    # NULL means unlimited.
+                    unlimited = max_monthly is None
+
+                    if not unlimited:
+                        allowance = int(monthly_credits or max_monthly or 0)
+
+                        # Reset on the first certification of a new billing
+                        # month. next_billing_date is used when available;
+                        # otherwise updated_at provides the fallback.
+                        cur.execute("""
+                            SELECT
+                                CASE
+                                    WHEN b.updated_at IS NULL THEN FALSE
+                                    WHEN DATE_TRUNC('month', b.updated_at)
+                                         < DATE_TRUNC('month', NOW())
+                                    THEN TRUE
+                                    ELSE FALSE
+                                END AS needs_reset
+                            FROM user_membership_billings b
+                            WHERE b.id = %s
+                            FOR UPDATE
+                        """, (membership["id"],))
+                        reset_row = cur.fetchone()
+                        needs_reset = bool(reset_row and reset_row["needs_reset"])
+
+                        if needs_reset:
+                            cur.execute("""
+                                UPDATE user_membership_billings
+                                SET credits_remaining = %s,
+                                    updated_at = NOW()
+                                WHERE id = %s
+                            """, (allowance, membership["id"]))
+                            credits_remaining = allowance
+                        else:
+                            credits_remaining = int(
+                                membership["credits_remaining"]
+                                if membership["credits_remaining"] is not None
+                                else allowance
+                            )
+
+                        if credits_remaining <= 0:
+                            return jsonify({
+                                "error": (
+                                    f"{plan.title()} plan has no certification "
+                                    "credits remaining for this month."
+                                ),
+                                "code": "MONTHLY_CREDITS_EXCEEDED",
+                                "plan": plan,
+                                "credits_remaining": 0
+                            }), 403
+
+                        # Consume exactly one credit.
+                        cur.execute("""
+                            UPDATE user_membership_billings
+                            SET credits_remaining = credits_remaining - 1,
+                                lifetime_credits_used =
+                                    COALESCE(lifetime_credits_used, 0) + 1,
+                                updated_at = NOW()
+                            WHERE id = %s
+                              AND credits_remaining > 0
+                            RETURNING credits_remaining
+                        """, (membership["id"],))
+                        consumed = cur.fetchone()
+
+                        if not consumed:
+                            return jsonify({
+                                "error": "No certification credits remaining.",
+                                "code": "MONTHLY_CREDITS_EXCEEDED"
+                            }), 403
+
+                elif plan == "free":
+                    # Free users without an explicit membership row receive
+                    # one monthly certification through the normal Free plan.
+                    pass
 
             suffix      = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
             cert_id     = f"SR-{datetime.utcnow().strftime('%Y%m%d')}-{suffix}"
@@ -865,10 +1024,16 @@ def certify_work():
 
             cur.execute("""
                 INSERT INTO job_queue
-                   (submission_id, creator_id, content_id, job_type, status, attempts)
-                VALUES (%s, %s, %s, 'certification', 'pending', 0)
+                   (submission_id, creator_id, content_id, job_type,
+                    status, attempts, priority)
+                VALUES (%s, %s, %s, 'certification', 'pending', 0, %s)
                 ON CONFLICT DO NOTHING
-            """, (submission_id, creator_uuid, content_url))
+            """, (
+                submission_id,
+                creator_uuid,
+                content_url,
+                PLAN_PRIORITY.get(plan, 1),
+            ))
 
             conn.commit()
             log_info("certify", "queued",
@@ -1454,7 +1619,24 @@ PAYFAST_PASSPHRASE   = os.environ.get("PAYFAST_PASSPHRASE", "")
 FRONTEND_URL         = os.environ.get("FRONTEND_URL", "https://seekreap-frontend.onrender.com")
 TIER4_INTERNAL       = os.environ.get("TIER4_INTERNAL", "https://seekreap-tier-4-orchestrator-1.onrender.com")
 
-PLAN_AMOUNTS = {"payg": 199, "creator": 999, "studio": 2999}
+
+PLAN_AMOUNTS = {"creator": 499, "studio": 999, "enterprise": 2999}
+
+# Certification queue priority:
+# Enterprise = Very High, Studio = High, Creator = Medium, Free = Low.
+PLAN_PRIORITY = {
+    "free": 1,
+    "creator": 2,
+    "studio": 3,
+    "enterprise": 4,
+}
+
+PLAN_PRIORITY_LABEL = {
+    "free": "low",
+    "creator": "medium",
+    "studio": "high",
+    "enterprise": "very_high",
+}
 
 _DISPOSABLE_DOMAINS = {
     "mailinator.com", "guerrillamail.com", "tempmail.com", "throwam.com",
@@ -1538,6 +1720,27 @@ def ensure_payments_tables():
                 last_retry_at    TIMESTAMP
             )
         """)
+        # Certification queue priority. Higher number = earlier processing.
+        cur.execute("""
+            ALTER TABLE job_queue
+            ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 1
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_job_queue_priority
+            ON job_queue (status, priority DESC, created_at ASC)
+        """)
+        cur.execute("""
+            UPDATE job_queue j
+            SET priority = CASE LOWER(COALESCE(s.plan, 'free'))
+                WHEN 'enterprise' THEN 4
+                WHEN 'studio' THEN 3
+                WHEN 'creator' THEN 2
+                ELSE 1
+            END
+            FROM submissions s
+            WHERE s.id = j.submission_id
+        """)
+
         cur.execute("CREATE INDEX IF NOT EXISTS idx_payments_payment_ref ON payments(payment_ref)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_payments_creator_id  ON payments(creator_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_payments_status      ON payments(status)")
@@ -6402,8 +6605,7 @@ def get_profile_billing():
     with db_cursor(RealDictCursor) as (conn, cur):
         cur.execute("""
             SELECT b.*, mp.name AS plan_name, mp.plan_code, mp.monthly_credits,
-                   mp.priority_processing, mp.coownership, mp.pdf_certificate,
-                   mp.verification_level
+                   mp.priority_processing, mp.coownership, mp.pdf_certificate
             FROM user_membership_billings b
             LEFT JOIN membership_plans mp ON mp.id = b.plan_id
             WHERE b.user_id = %s
