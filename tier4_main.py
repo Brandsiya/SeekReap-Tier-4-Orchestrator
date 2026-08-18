@@ -5975,7 +5975,7 @@ RESUME_SECTIONS = {
     "linked-accounts": {
         "table": "user_linked_accounts",
         "writable": ["platform", "external_id", "username", "display_name",
-                     "profile_url", "avatar"],
+                     "profile_url", "avatar", "is_public"],
     },
     "creative-roles": {
         "table": "user_creative_roles",
@@ -6064,6 +6064,12 @@ def _resume_list_rows(section, actor_id):
             cur.execute(f"""
                 SELECT * FROM {table} WHERE {user_col} = %s
                 ORDER BY display_order
+            """, (actor_id,))
+        elif table == "user_linked_accounts":
+            cur.execute(f"""
+                SELECT * FROM {table}
+                WHERE {user_col} = %s AND deleted_at IS NULL
+                ORDER BY connected_at DESC NULLS LAST
             """, (actor_id,))
         else:
             cur.execute(f"""
@@ -6596,12 +6602,23 @@ def get_profile_full():
         for slug, cfg in RESUME_SECTIONS.items():
             if slug in ("portfolio-sections", "creative-works", "creative-roles"):
                 continue
+
             table = cfg["table"]
-            cur.execute(f"""
-                SELECT * FROM {table}
-                WHERE user_id = %s AND deleted_at IS NULL
-                ORDER BY COALESCE(display_order, 0), created_at
-            """, (actor_id,))
+
+            if table == "user_linked_accounts":
+                cur.execute("""
+                    SELECT * FROM user_linked_accounts
+                    WHERE user_id = %s
+                      AND deleted_at IS NULL
+                    ORDER BY connected_at DESC NULLS LAST
+                """, (actor_id,))
+            else:
+                cur.execute(f"""
+                    SELECT * FROM {table}
+                    WHERE user_id = %s AND deleted_at IS NULL
+                    ORDER BY COALESCE(display_order, 0), created_at
+                """, (actor_id,))
+
             resume_data[slug] = cur.fetchall()
 
         cur.execute("SELECT * FROM portfolio_sections WHERE user_id = %s ORDER BY display_order",
@@ -6761,6 +6778,27 @@ def get_public_profile(profile_id):
             """, (profile_id,))
         works = cur.fetchall()
 
+        # Linked accounts have row-level visibility.
+        # Owners see all non-deleted accounts.
+        # Public viewers see only explicitly public accounts.
+        if is_owner:
+            cur.execute("""
+                SELECT * FROM user_linked_accounts
+                WHERE user_id = %s
+                  AND deleted_at IS NULL
+                ORDER BY connected_at DESC NULLS LAST
+            """, (profile_id,))
+        else:
+            cur.execute("""
+                SELECT * FROM user_linked_accounts
+                WHERE user_id = %s
+                  AND deleted_at IS NULL
+                  AND is_public IS TRUE
+                ORDER BY connected_at DESC NULLS LAST
+            """, (profile_id,))
+
+        linked_accounts = cur.fetchall()
+
         stats = {}
         try:
             cur.execute("SELECT * FROM get_profile_statistics(%s)", (profile_id,))
@@ -6814,6 +6852,7 @@ def get_public_profile(profile_id):
     return jsonify({
         "profile":        _sanitize_public_profile(profile, is_owner),
         "creative_roles": [_profile_row_to_json(r) for r in roles],
+        "linked_accounts": [_profile_row_to_json(r) for r in linked_accounts],
         "portfolio": {
             "sections": [_profile_row_to_json(r) for r in sections],
             "works":    [_profile_row_to_json(r) for r in works],
@@ -6967,3 +7006,5 @@ def untrust_profile(profile_id):
     })
 
 # # ══ SOCIAL_LINKS_REMOVED_V1 ══
+
+# # ══ LINKED_ACCOUNTS_PROFILE_FIX_V1 ══
