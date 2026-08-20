@@ -109,7 +109,7 @@ NEW_ROUTES_CODE = '''
 # ══════════════════════════════════════════════════════════════════
 # TRUST API v1 — real trust relationships via user_trusts.
 # trusted_by_count = how many other users trust this profile
-# trusted_count    = how many other profiles this user trusts
+# trusted_count    = how many other users this user trusts
 # ══════════════════════════════════════════════════════════════════
 
 @app.post("/api/profile/<profile_id>/trust")

@@ -181,7 +181,7 @@ def _fetch_jwks(force: bool = False) -> list:
                           status=resp.status_code, body=resp.text[:400])
         except requests.exceptions.ConnectionError as e:
             log_error("auth", "jwks_connection_error", error=str(e),
-                      hint="Fly container cannot reach Supabase — check egress/DNS")
+                      hint="Container cannot reach Supabase — check egress/DNS")
         except requests.exceptions.Timeout:
             log_error("auth", "jwks_timeout", url=url)
         except Exception as e:
@@ -257,6 +257,179 @@ def _verify_supabase_jwt(token: str) -> dict | None:
 # Auth helpers
 # FIX: _require_auth now validates sub is present and logs verified identity
 # ══════════════════════════════════════════════════════════════════════════════
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NOTIFICATIONS — Core Service
+# ══════════════════════════════════════════════════════════════════════════════
+
+NOTIFICATION_CATEGORIES = {
+    "rights-assets",
+    "collaboration",
+    "social",
+    "account",
+    "system",
+}
+
+
+def create_notification(
+    recipient_id,
+    notification_type,
+    title,
+    message,
+    *,
+    category,
+    actor_id=None,
+    action_label=None,
+    action_url=None,
+    entity_type=None,
+    entity_id=None,
+    metadata=None,
+):
+    """
+    Create a persistent notification.
+
+    All backend notification-producing events should use this function
+    rather than inserting directly into the notifications table.
+    """
+
+    if not recipient_id:
+        raise ValueError("recipient_id is required")
+
+    if not notification_type:
+        raise ValueError("notification_type is required")
+
+    if category not in NOTIFICATION_CATEGORIES:
+        raise ValueError(f"Invalid notification category: {category}")
+
+    metadata = metadata or {}
+
+    with db_cursor() as (conn, cur):
+        cur.execute(
+            """
+            INSERT INTO notifications (
+                recipient_id,
+                actor_id,
+                type,
+                category,
+                title,
+                message,
+                action_label,
+                action_url,
+                entity_type,
+                entity_id,
+                metadata
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb
+            )
+            RETURNING
+                id,
+                recipient_id,
+                actor_id,
+                type,
+                category,
+                title,
+                message,
+                action_label,
+                action_url,
+                entity_type,
+                entity_id,
+                metadata,
+                read_at,
+                created_at
+            """,
+            (
+                recipient_id,
+                actor_id,
+                notification_type,
+                category,
+                title,
+                message,
+                action_label,
+                action_url,
+                entity_type,
+                entity_id,
+                json.dumps(metadata),
+            ),
+        )
+
+        row = cur.fetchone()
+        conn.commit()
+
+    return dict(row) if row else None
+
+
+
+def _notification_recipient_id(claims, conn):
+    """
+    Resolve the authenticated Supabase user to the canonical
+    SeekReap user_profiles.id.
+
+    The Supabase JWT `sub` is the authenticated user's UUID.
+    SeekReap user_profiles.id is the application's canonical
+    user identity and is used by notifications.recipient_id.
+    """
+
+    if not claims or not claims.get("sub"):
+        raise ValueError("Authenticated subject is missing")
+
+    user_id = str(claims["sub"]).strip()
+
+    if not _valid_uuid(user_id):
+        raise ValueError("Authenticated subject is not a valid UUID")
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id
+            FROM user_profiles
+            WHERE id = %s
+              AND deleted_at IS NULL
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+
+        row = cur.fetchone()
+
+    if not row:
+        raise ValueError("Authenticated user profile not found")
+
+    return user_id
+
+def serialize_notification(row):
+    """Convert a notification database row to API JSON."""
+
+    if row is None:
+        return None
+
+    return {
+        "id": str(row["id"]),
+        "type": row["type"],
+        "category": row["category"],
+        "title": row["title"],
+        "message": row["message"],
+        "action_label": row["action_label"],
+        "action_url": row["action_url"],
+        "actor_id": (
+            str(row["actor_id"])
+            if row["actor_id"]
+            else None
+        ),
+        "entity_type": row["entity_type"],
+        "entity_id": row["entity_id"],
+        "metadata": row["metadata"] or {},
+        "read_at": (
+            row["read_at"].isoformat()
+            if row["read_at"]
+            else None
+        ),
+        "created_at": row["created_at"].isoformat(),
+    }
+
+
 
 def _require_auth(req) -> tuple:
     auth_header = req.headers.get("Authorization", "")
@@ -420,243 +593,496 @@ def extract_youtube_metadata(url):
 # Creator / submission helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
-def get_or_create_creator(conn, firebase_uid, email=None, name=None):
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        try:
-            uuid.UUID(firebase_uid)
-            cur.execute("SELECT id FROM creators WHERE id = %s", (firebase_uid,))
-            if cur.fetchone():
-                return firebase_uid
-        except (ValueError, AttributeError):
-            pass
-        cur.execute("ALTER TABLE creators ADD COLUMN IF NOT EXISTS firebase_uid varchar(128) UNIQUE")
-        conn.commit()
-        cur.execute("SELECT id FROM creators WHERE firebase_uid = %s", (firebase_uid,))
-        row = cur.fetchone()
-        if row:
-            return str(row["id"])
-        new_id = str(uuid.uuid4())
-        cur.execute("""
-            INSERT INTO creators (id, email, name, firebase_uid)
-            VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING RETURNING id
-        """, (new_id, email or f"{firebase_uid}@firebase.user", name or "Creator", firebase_uid))
-        row = cur.fetchone()
-        conn.commit()
-        if row:
-            return str(row["id"])
-        cur.execute("SELECT id FROM creators WHERE firebase_uid = %s", (firebase_uid,))
-        row = cur.fetchone()
-        return str(row["id"]) if row else new_id
+def list_notifications():
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
+    try:
+        with db_cursor(RealDictCursor) as (conn, cur):
+            recipient_id = _notification_recipient_id(claims, conn)
+
+            limit = min(
+                max(int(request.args.get("limit", 50)), 1),
+                100,
+            )
+            offset = max(int(request.args.get("offset", 0)), 0)
+
+            category = request.args.get("category")
+            unread_only = request.args.get("unread") == "true"
+
+            where = [
+                "recipient_id = %s",
+                "deleted_at IS NULL",
+            ]
+            params = [recipient_id]
+
+            if category:
+                where.append("category = %s")
+                params.append(category)
+
+            if unread_only:
+                where.append("read_at IS NULL")
+
+            where_sql = " AND ".join(where)
+
+            cur.execute(
+                f"""
+                SELECT
+                    id,
+                    recipient_id,
+                    actor_id,
+                    type,
+                    category,
+                    title,
+                    message,
+                    action_label,
+                    action_url,
+                    entity_type,
+                    entity_id,
+                    metadata,
+                    read_at,
+                    created_at
+                FROM notifications
+                WHERE {where_sql}
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                (*params, limit, offset),
+            )
+
+            rows = cur.fetchall()
+
+            cur.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM notifications
+                WHERE {where_sql}
+                """,
+                tuple(params),
+            )
+
+            total = cur.fetchone()["total"]
+
+            cur.execute(
+                """
+                SELECT COUNT(*) AS unread
+                FROM notifications
+                WHERE recipient_id = %s
+                  AND deleted_at IS NULL
+                  AND read_at IS NULL
+                """,
+                (recipient_id,),
+            )
+
+            unread = cur.fetchone()["unread"]
+
+        return jsonify({
+            "notifications": [
+                serialize_notification(row)
+                for row in rows
+            ],
+            "total": total,
+            "unread_count": unread,
+            "limit": limit,
+            "offset": offset,
+        }), 200
+
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid notification query parameters"}), 400
+    except Exception as e:
+        log_warn(
+            "notifications",
+            "list_error",
+            error=str(e),
+        )
+        return jsonify({"error": "Unable to load notifications"}), 500
+
+
+@app.get("/api/notifications/unread-count")
+def notification_unread_count():
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
+    try:
+        with db_cursor(RealDictCursor) as (conn, cur):
+            recipient_id = _notification_recipient_id(claims, conn)
+
+            cur.execute(
+                """
+                SELECT COUNT(*) AS unread
+                FROM notifications
+                WHERE recipient_id = %s
+                  AND deleted_at IS NULL
+                  AND read_at IS NULL
+                """,
+                (recipient_id,),
+            )
+
+            count = cur.fetchone()["unread"]
+
+        return jsonify({
+            "unread_count": count
+        }), 200
+
+    except Exception as e:
+        log_warn(
+            "notifications",
+            "unread_count_error",
+            error=str(e),
+        )
+        return jsonify({
+            "error": "Unable to load unread notification count"
+        }), 500
+
+
+@app.patch("/api/notifications/<notification_id>/read")
+def mark_notification_read(notification_id):
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
+    try:
+        with db_cursor(RealDictCursor) as (conn, cur):
+            recipient_id = _notification_recipient_id(claims, conn)
+
+            cur.execute(
+                """
+                UPDATE notifications
+                SET read_at = COALESCE(read_at, NOW())
+                WHERE id = %s
+                  AND recipient_id = %s
+                  AND deleted_at IS NULL
+                RETURNING
+                    id,
+                    recipient_id,
+                    actor_id,
+                    type,
+                    category,
+                    title,
+                    message,
+                    action_label,
+                    action_url,
+                    entity_type,
+                    entity_id,
+                    metadata,
+                    read_at,
+                    created_at
+                """,
+                (notification_id, recipient_id),
+            )
+
+            row = cur.fetchone()
+
+            if not row:
+                return jsonify({
+                    "error": "Notification not found"
+                }), 404
+
+            conn.commit()
+
+        return jsonify({
+            "notification": serialize_notification(row)
+        }), 200
+
+    except Exception as e:
+        log_warn(
+            "notifications",
+            "mark_read_error",
+            error=str(e),
+        )
+        return jsonify({
+            "error": "Unable to mark notification as read"
+        }), 500
+
+
+@app.patch("/api/notifications/<notification_id>/unread")
+def mark_notification_unread(notification_id):
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
+    try:
+        with db_cursor(RealDictCursor) as (conn, cur):
+            recipient_id = _notification_recipient_id(claims, conn)
+
+            cur.execute(
+                """
+                UPDATE notifications
+                SET read_at = NULL
+                WHERE id = %s
+                  AND recipient_id = %s
+                  AND deleted_at IS NULL
+                RETURNING
+                    id,
+                    recipient_id,
+                    actor_id,
+                    type,
+                    category,
+                    title,
+                    message,
+                    action_label,
+                    action_url,
+                    entity_type,
+                    entity_id,
+                    metadata,
+                    read_at,
+                    created_at
+                """,
+                (notification_id, recipient_id),
+            )
+
+            row = cur.fetchone()
+
+            if not row:
+                return jsonify({
+                    "error": "Notification not found"
+                }), 404
+
+            conn.commit()
+
+        return jsonify({
+            "notification": serialize_notification(row)
+        }), 200
+
+    except Exception as e:
+        log_warn(
+            "notifications",
+            "mark_unread_error",
+            error=str(e),
+        )
+        return jsonify({
+            "error": "Unable to mark notification as unread"
+        }), 500
+
+
+@app.post("/api/notifications/mark-all-read")
+def mark_all_notifications_read():
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
+    try:
+        with db_cursor() as (conn, cur):
+            recipient_id = _notification_recipient_id(claims, conn)
+
+            cur.execute(
+                """
+                UPDATE notifications
+                SET read_at = NOW()
+                WHERE recipient_id = %s
+                  AND deleted_at IS NULL
+                  AND read_at IS NULL
+                """,
+                (recipient_id,),
+            )
+
+            updated = cur.rowcount
+            conn.commit()
+
+        return jsonify({
+            "updated": updated
+        }), 200
+
+    except Exception as e:
+        log_warn(
+            "notifications",
+            "mark_all_read_error",
+            error=str(e),
+        )
+        return jsonify({
+            "error": "Unable to mark notifications as read"
+        }), 500
+
+
+@app.delete("/api/notifications/<notification_id>")
+def delete_notification(notification_id):
+    claims, err = _require_auth(request)
+    if err:
+        return err
+
+    try:
+        with db_cursor() as (conn, cur):
+            recipient_id = _notification_recipient_id(claims, conn)
+
+            cur.execute(
+                """
+                UPDATE notifications
+                SET deleted_at = NOW()
+                WHERE id = %s
+                  AND recipient_id = %s
+                  AND deleted_at IS NULL
+                """,
+                (notification_id, recipient_id),
+            )
+
+            if cur.rowcount == 0:
+                return jsonify({
+                    "error": "Notification not found"
+                }), 404
+
+            conn.commit()
+
+        return jsonify({
+            "deleted": True,
+            "id": notification_id,
+        }), 200
+
+    except Exception as e:
+        log_warn(
+            "notifications",
+            "delete_error",
+            error=str(e),
+        )
+        return jsonify({
+            "error": "Unable to delete notification"
+        }), 500
+
 
 
 @app.get("/api/creators/me")
 def get_my_profile():
-    """Powers profile.html. name/company_name/preferences live on `creators`;
-    the richer optional fields live on `profiles` (created alongside a
-    creator's first collaboration-invite acceptance, or on first profile
-    save — see the ON CONFLICT upsert in update_my_profile below)."""
+    """Return the authenticated user's canonical SeekReap profile."""
+
     claims, err = _require_auth(request)
     if err:
         return err
-    firebase_uid = claims.get("sub", "")
-    if not firebase_uid:
+
+    user_id = claims.get("sub", "")
+    if not user_id:
         return jsonify({"error": "Invalid session"}), 401
 
+    email = claims.get("email")
+
     with db_conn() as conn:
-        creator_uuid = get_or_create_creator(conn, firebase_uid, claims.get("email"))
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                "SELECT id, email, name, company_name, preferences FROM creators WHERE id = %s",
-                (creator_uuid,)
-            )
-            creator = cur.fetchone() or {}
-            cur.execute(
-                "SELECT full_name, artistic_name, title, gender, country FROM profiles WHERE id = %s",
-                (creator_uuid,)
-            )
-            profile = cur.fetchone() or {}
+            cur.execute("""
+                SELECT
+                    id,
+                    display_name,
+                    legal_full_name,
+                    artistic_name,
+                    title,
+                    gender,
+                    country_of_residence,
+                    user_notifications_preference
+                FROM user_profiles
+                WHERE id = %s
+                  AND deleted_at IS NULL
+                LIMIT 1
+            """, (user_id,))
+
+            profile = cur.fetchone()
+
+    if not profile:
+        return jsonify({"error": "User profile not found"}), 404
 
     return jsonify({
-        "id":            creator.get("id"),
-        "email":         creator.get("email"),
-        "name":          creator.get("name"),
-        "company_name":  creator.get("company_name"),
-        "preferences":   creator.get("preferences") or {},
-        "full_name":     profile.get("full_name"),
-        "artistic_name": profile.get("artistic_name"),
-        "title":         profile.get("title"),
-        "gender":        profile.get("gender"),
-        "country":       profile.get("country"),
+        "id":           str(profile["id"]),
+        "email":        email,
+        "name":         profile["display_name"] or profile["legal_full_name"],
+        "company_name": None,
+        "preferences":  profile["user_notifications_preference"] or {},
+        "full_name":    profile["legal_full_name"],
+        "artistic_name": profile["artistic_name"],
+        "title":        profile["title"],
+        "gender":       profile["gender"],
+        "country":      profile["country_of_residence"],
     })
 
 
 @app.patch("/api/creators/me")
 def update_my_profile():
-    """Partial update — only fields present in the body are touched.
-    `preferences` replaces the whole JSONB blob (profile.html always sends
-    the complete notification-prefs object, not a partial one)."""
+    """Partial update of the authenticated user's canonical profile."""
+
     claims, err = _require_auth(request)
     if err:
         return err
-    firebase_uid = claims.get("sub", "")
-    if not firebase_uid:
+
+    user_id = claims.get("sub", "")
+    if not user_id:
         return jsonify({"error": "Invalid session"}), 401
 
     body = request.get_json(force=True) or {}
 
     def clamp(key, maxlen):
-        return _clamp_str(body[key], maxlen).strip() if key in body and body[key] is not None else None
+        return (
+            _clamp_str(body[key], maxlen).strip()
+            if key in body and body[key] is not None
+            else None
+        )
 
     name          = clamp("name", 200)
-    company_name  = clamp("company_name", 200)
     full_name     = clamp("full_name", 200)
     artistic_name = clamp("artistic_name", 200)
     title         = clamp("title", 20)
     gender        = clamp("gender", 40)
     country       = clamp("country", 80)
-    preferences   = body.get("preferences") if isinstance(body.get("preferences"), dict) else None
+
+    preferences = (
+        body.get("preferences")
+        if isinstance(body.get("preferences"), dict)
+        else None
+    )
 
     with db_conn() as conn:
-        creator_uuid = get_or_create_creator(conn, firebase_uid, claims.get("email"))
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            sets, vals = [], []
-            if name is not None:         sets.append("name = %s");         vals.append(name)
-            if company_name is not None: sets.append("company_name = %s"); vals.append(company_name)
-            if preferences is not None:  sets.append("preferences = %s");  vals.append(json.dumps(preferences))
+            sets = []
+            vals = []
+
+            if name is not None:
+                sets.append("display_name = %s")
+                vals.append(name)
+
+            if full_name is not None:
+                sets.append("legal_full_name = %s")
+                vals.append(full_name)
+
+            if artistic_name is not None:
+                sets.append("artistic_name = %s")
+                vals.append(artistic_name)
+
+            if title is not None:
+                sets.append("title = %s")
+                vals.append(title)
+
+            if gender is not None:
+                sets.append("gender = %s")
+                vals.append(gender)
+
+            if country is not None:
+                sets.append("country_of_residence = %s")
+                vals.append(country)
+
+            if preferences is not None:
+                sets.append("user_notifications_preference = %s::jsonb")
+                vals.append(json.dumps(preferences))
+
             if sets:
-                vals.append(creator_uuid)
-                cur.execute(f"UPDATE creators SET {', '.join(sets)} WHERE id = %s", vals)
+                sets.append("updated_at = NOW()")
+                vals.append(user_id)
 
-            if any(v is not None for v in (full_name, artistic_name, title, gender, country)):
-                cur.execute("""
-                    INSERT INTO profiles (id, full_name, artistic_name, title, gender, country, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                    ON CONFLICT (id) DO UPDATE SET
-                        full_name     = COALESCE(EXCLUDED.full_name, profiles.full_name),
-                        artistic_name = COALESCE(EXCLUDED.artistic_name, profiles.artistic_name),
-                        title         = COALESCE(EXCLUDED.title, profiles.title),
-                        gender        = COALESCE(EXCLUDED.gender, profiles.gender),
-                        country       = COALESCE(EXCLUDED.country, profiles.country),
-                        updated_at    = NOW()
-                """, (creator_uuid, full_name, artistic_name, title, gender, country))
-            conn.commit()
+                cur.execute(
+                    f"""
+                    UPDATE user_profiles
+                    SET {', '.join(sets)}
+                    WHERE id = %s
+                      AND deleted_at IS NULL
+                    """,
+                    vals,
+                )
 
-    return jsonify({"status": "ok"})
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    return jsonify({
+                        "error": "User profile not found"
+                    }), 404
 
-
-def insert_submission(data, creator_uuid):
-    content_url  = data.get("content_url")
-    content_hash = data.get("content_hash", "unknown")
-    content_type = data.get("content_type", "video")
-
-    with db_cursor(RealDictCursor) as (conn, cur):
-        cur.execute("""
-            SELECT id, title, content_preview_url FROM submissions
-            WHERE creator_id = %s AND content_hash = %s
-            ORDER BY submitted_at DESC LIMIT 1
-        """, (creator_uuid, content_hash))
-        existing = cur.fetchone()
-        if existing:
-            log_info("submit", "dedup_hit",
-                     submission_id=str(existing['id']), hash=content_hash)
-            return (str(existing["id"]), existing["title"] or content_hash,
-                    "", existing["content_preview_url"] or "")
-
-        submission_id = str(uuid.uuid4())
-        yt_meta       = extract_youtube_metadata(content_url)
-        title         = yt_meta.get("title") or data.get("title") or content_hash
-        channel       = yt_meta.get("channel", "")
-        thumbnail_url = yt_meta.get("thumbnail_url", "")
-        metadata      = {**yt_meta, **(data.get("metadata") or {})}
-
-        try:
-            cur.execute("""
-                INSERT INTO submissions
-                    (id, creator_id, title, description, content_hash, content_type,
-                     content_url, content_preview_url, status, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s)
-            """, (submission_id, creator_uuid, title,
-                  data.get("description") or yt_meta.get("description", ""),
-                  content_hash, content_type, content_url, thumbnail_url,
-                  json.dumps(metadata)))
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            log_error("submit", "db_insert_error", error=str(e))
-            raise
-
-        log_info("submit", "created", submission_id=submission_id, title=title)
-        cur.execute("""
-            INSERT INTO job_queue
-                (submission_id, creator_id, content_id, job_type,
-                 status, attempts, priority)
-            VALUES (%s, %s, %s, %s, %s, 0, %s)
-            ON CONFLICT DO NOTHING
-        """, (
-            submission_id,
-            creator_uuid,
-            content_url,
-            "fingerprint",
-            "pending",
-            PLAN_PRIORITY.get("free", 1),
-        ))
         conn.commit()
 
-    return submission_id, title, channel, thumbnail_url
+    return jsonify({"ok": True})
 
-
-def check_rate_limit(creator_uuid: str) -> tuple:
-    with db_cursor() as (conn, cur):
-        cur.execute("SELECT COUNT(*) FROM job_queue WHERE status IN ('pending', 'processing')")
-        if cur.fetchone()[0] >= QUEUE_CAP:
-            return False, "System queue full. Try again later."
-        cur.execute("""
-            SELECT COUNT(*) FROM submissions
-            WHERE creator_id = %s AND submitted_at >= NOW() - INTERVAL '24 hours'
-        """, (creator_uuid,))
-        daily = cur.fetchone()[0]
-        if daily >= DAILY_QUOTA:
-            return False, f"Daily quota reached ({daily}/{DAILY_QUOTA}). Resets in 24h."
-        return True, ""
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PRIORITY QUEUE
-# ══════════════════════════════════════════════════════════════════════════════
-
-def dequeue_priority_job(cur):
-    """Claim the highest-priority pending queue job."""
-
-    cur.execute("""
-        SELECT *
-        FROM job_queue
-        WHERE status = 'pending'
-        ORDER BY priority DESC, created_at ASC
-        FOR UPDATE SKIP LOCKED
-        LIMIT 1
-    """)
-
-    job = cur.fetchone()
-
-    if not job:
-        return None
-
-    job_id = job["job_id"] if isinstance(job, dict) else job[0]
-
-    cur.execute("""
-        UPDATE job_queue
-        SET status = 'processing',
-            processing_started_at = NOW()
-        WHERE job_id = %s
-        RETURNING *
-    """, (job_id,))
-
-    return cur.fetchone()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Core routes
-# ══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/health")
 def health():
@@ -742,12 +1168,9 @@ def submit():
         return err
     try:
         data         = request.get_json(force=True) or {}
-        firebase_uid = claims.get("sub", data.get("creator_id", ""))
-        if not firebase_uid:
-            return jsonify({"error": "creator_id required"}), 400
-        with db_conn() as conn:
-            creator_uuid = get_or_create_creator(conn, firebase_uid,
-                                                  data.get("email"), data.get("name"))
+        creator_uuid = claims.get("sub", "")
+        if not creator_uuid:
+            return jsonify({"error": "Authenticated user required"}), 401
         allowed, reason = check_rate_limit(creator_uuid)
         if not allowed:
             return jsonify({"error": reason, "code": "RATE_LIMITED"}), 429
@@ -982,19 +1405,6 @@ def certify_work():
             email         = cleaned["email"]
             artistic_name = cleaned["artistic_name"]
             creator_email = email or f"{creator_uuid[:8]}@seekreap.local"
-
-            try:
-                cur.execute("""
-                    INSERT INTO creators (id, email, name) VALUES (%s, %s, %s)
-                    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
-                """, (creator_uuid, creator_email, artistic_name or title))
-            except Exception:
-                conn.rollback()
-                cur.execute("""
-                    INSERT INTO creators (id, email, name) VALUES (%s, %s, %s)
-                    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
-                """, (creator_uuid, f"{creator_uuid[:8]}@seekreap.local",
-                      artistic_name or title))
 
             collaborators   = cleaned["collaborators"]
             ownership_split = cleaned["ownership_split"]
@@ -1586,17 +1996,35 @@ def accept_invite():
             """, (user_id, updated["certificate_id"],
                   updated["ownership_title"], updated["split"]))
 
-            if invite.get("full_name") or invite.get("artistic_name"):
+            if (
+                invite.get("full_name")
+                or invite.get("artistic_name")
+                or invite.get("title")
+                or invite.get("gender")
+                or invite.get("country")
+            ):
                 cur.execute("""
-                    INSERT INTO profiles (id, full_name, artistic_name, title, gender, country)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO UPDATE SET
-                        full_name = EXCLUDED.full_name,
-                        artistic_name = EXCLUDED.artistic_name,
-                        title = EXCLUDED.title, gender = EXCLUDED.gender,
-                        country = EXCLUDED.country, updated_at = NOW()
-                """, (user_id, invite.get("full_name"), invite.get("artistic_name"),
-                      invite.get("title"), invite.get("gender"), invite.get("country")))
+                    UPDATE user_profiles
+                    SET
+                        legal_full_name = COALESCE(%s, legal_full_name),
+                        artistic_name = COALESCE(%s, artistic_name),
+                        title = COALESCE(%s, title),
+                        gender = COALESCE(%s, gender),
+                        country_of_residence = COALESCE(%s, country_of_residence),
+                        updated_at = NOW()
+                    WHERE id = %s
+                      AND deleted_at IS NULL
+                """, (
+                    invite.get("full_name"),
+                    invite.get("artistic_name"),
+                    invite.get("title"),
+                    invite.get("gender"),
+                    invite.get("country"),
+                    user_id,
+                ))
+
+                if cur.rowcount == 0:
+                    raise ValueError("Authenticated user profile not found")
 
             conn.commit()
             return jsonify({
@@ -2535,7 +2963,7 @@ _atexit.register(_shutdown_pool)
 # ── Startup: pre-warm JWKS cache ──────────────────────────────────────────────
 # Fetches Supabase public keys at module load time so every process (including
 # gunicorn worker forks) has a warm cache before the first request arrives.
-# Without this, a cold-start race between Fly machines means auth-probe hits
+# Without this, a cold-start race between application instances means auth-probe hits
 # machine A (warm) while /api/payments/initiate hits machine B (cold) → 401.
 def _warmup_jwks():
     if not SUPABASE_URL:
@@ -6140,7 +6568,7 @@ def evaluate_rights(agreement_id: str, actor_id: str,
 # Covers all 27 tables of the Profile Domain.
 # Auth: Supabase JWT sub is used directly as the row-owning UUID
 # (this schema is auth.uid() = user_id / = id everywhere, so no
-# firebase-style uuid5 hashing is needed here, unlike /api/certify).
+# deterministic UUID5 hashing is needed here, unlike /api/certify).
 # ══════════════════════════════════════════════════════════════════
 
 from decimal import Decimal as _Decimal
@@ -7128,7 +7556,7 @@ def share_profile(profile_id):
 # ══════════════════════════════════════════════════════════════════
 # TRUST API v1 — real trust relationships via user_trusts.
 # trusted_by_count = how many other users trust this profile
-# trusted_count    = how many other profiles this user trusts
+# trusted_count    = how many other users this user trusts
 # ══════════════════════════════════════════════════════════════════
 
 @app.post("/api/profile/<profile_id>/trust")

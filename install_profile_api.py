@@ -30,7 +30,7 @@ PROFILE_API_CODE = '''
 # Covers all 27 tables of the Profile Domain.
 # Auth: Supabase JWT sub is used directly as the row-owning UUID
 # (this schema is auth.uid() = user_id / = id everywhere, so no
-# firebase-style uuid5 hashing is needed here, unlike /api/certify).
+# deterministic UUID5 hashing is needed here, unlike /api/certify).
 # ══════════════════════════════════════════════════════════════════
 
 from decimal import Decimal as _Decimal
@@ -780,7 +780,7 @@ def main():
     print("            employment, achievements, portfolio-sections, creative-works")
     print()
     print("Next: git add -A && git commit -m 'Add Profile Domain API' && git push")
-    print("Then: fly deploy -a seekreap-tier-4-dev  (or your Fly app name)")
+    print("Then deploy the application using your configured deployment method.")
 
 
 if __name__ == "__main__":
