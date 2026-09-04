@@ -6608,10 +6608,6 @@ RESUME_SECTIONS = {
         "writable": ["platform", "external_id", "username", "display_name",
                      "profile_url", "avatar", "is_public"],
     },
-    "creative-roles": {
-        "table": "user_creative_roles",
-        "writable": ["creative_role_id", "featured", "display_order", "metadata"],
-    },
     "languages": {
         "table": "user_languages",
         "writable": ["language_code", "language_name", "proficiency",
@@ -7071,13 +7067,10 @@ def get_profile_reference():
         verification_statuses = cur.fetchall()
         cur.execute("SELECT * FROM membership_plans WHERE active IS NOT FALSE ORDER BY sort_order")
         membership_plans = cur.fetchall()
-        cur.execute("SELECT * FROM creative_roles WHERE active IS NOT FALSE ORDER BY display_order")
-        creative_roles = cur.fetchall()
     return jsonify({
         "user_types":             [_profile_row_to_json(r) for r in user_types],
         "verification_statuses":  [_profile_row_to_json(r) for r in verification_statuses],
         "membership_plans":       [_profile_row_to_json(r) for r in membership_plans],
-        "creative_roles":         [_profile_row_to_json(r) for r in creative_roles],
     })
 
 
@@ -7219,18 +7212,18 @@ def get_profile_full():
         billing = cur.fetchone()
 
         cur.execute("""
-            SELECT ucr.id, ucr.featured, ucr.display_order,
-                   cr.code, cr.name, cr.category, cr.icon, cr.color
-            FROM user_creative_roles ucr
-            JOIN creative_roles cr ON cr.id = ucr.creative_role_id
-            WHERE ucr.user_id = %s AND ucr.deleted_at IS NULL
-            ORDER BY ucr.display_order
+            SELECT id, role, assigned_at, active, expires_at, metadata
+            FROM user_roles
+            WHERE user_id = %s
+              AND active = TRUE
+              AND (expires_at IS NULL OR expires_at > NOW())
+            ORDER BY assigned_at
         """, (actor_id,))
-        creative_roles = cur.fetchall()
+        roles = cur.fetchall()
 
         resume_data = {}
         for slug, cfg in RESUME_SECTIONS.items():
-            if slug in ("portfolio-sections", "creative-works", "creative-roles"):
+            if slug in ("portfolio-sections", "creative-works"):
                 continue
 
             table = cfg["table"]
@@ -7264,7 +7257,7 @@ def get_profile_full():
         "exists":  True,
         "profile": _profile_row_to_json(profile),
         "billing": _profile_row_to_json(billing) if billing else None,
-        "creative_roles":  [_profile_row_to_json(r) for r in creative_roles],
+        "roles":           [_profile_row_to_json(r) for r in roles],
         "identifiers":     [_profile_row_to_json(r) for r in resume_data.get("identifiers", [])],
         "linked_accounts": [_profile_row_to_json(r) for r in resume_data.get("linked-accounts", [])],
         "languages":       [_profile_row_to_json(r) for r in resume_data.get("languages", [])],
@@ -7379,12 +7372,12 @@ def get_public_profile(profile_id):
             return jsonify({"error": "not found"}), 404
 
         cur.execute("""
-            SELECT ucr.id, ucr.featured, ucr.display_order,
-                   cr.code, cr.name, cr.category, cr.icon, cr.color
-            FROM user_creative_roles ucr
-            JOIN creative_roles cr ON cr.id = ucr.creative_role_id
-            WHERE ucr.user_id = %s AND ucr.deleted_at IS NULL
-            ORDER BY ucr.display_order
+            SELECT id, role, assigned_at, active, expires_at, metadata
+            FROM user_roles
+            WHERE user_id = %s
+              AND active = TRUE
+              AND (expires_at IS NULL OR expires_at > NOW())
+            ORDER BY assigned_at
         """, (profile_id,))
         roles = cur.fetchall()
 
@@ -7481,7 +7474,7 @@ def get_public_profile(profile_id):
 
     return jsonify({
         "profile":        _sanitize_public_profile(profile, is_owner),
-        "creative_roles": [_profile_row_to_json(r) for r in roles],
+        "roles":         [_profile_row_to_json(r) for r in roles],
         "linked_accounts": [_profile_row_to_json(r) for r in linked_accounts],
         "portfolio": {
             "sections": [_profile_row_to_json(r) for r in sections],
