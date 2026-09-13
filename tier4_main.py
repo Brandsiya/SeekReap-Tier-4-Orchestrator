@@ -6617,6 +6617,8 @@ RESUME_SECTIONS = {
     "skills": {
         "table": "user_skills",
         "writable": ["skill_name", "proficiency_level", "years_experience",
+                     "skill_provider", "skill_field", "start_date", "end_date",
+                     "is_currently_attending", "certificate_url",
                      "featured", "display_order", "metadata"],
     },
     "certifications": {
@@ -6860,20 +6862,56 @@ def delete_resume_item(section, item_id):
 
 # ── Core Identity: user_profiles (single row per user, upsert on save) ───────
 USER_PROFILE_WRITABLE = [
-    "first_legal_name", "middle_legal_name", "last_legal_name", "legal_full_name",
-    "display_name", "title", "gender", "date_of_birth", "artistic_slug",
-    "country_code", "province_code", "recovery_email", "primary_phone",
-    "secondary_phone", "contact_preference",
-    "postal_address_line1", "postal_address_line2", "postal_city",
-    "postal_province", "postal_country", "postal_postal_code",
-    "physical_address_line1", "physical_address_line2", "physical_city",
-    "physical_province", "physical_country", "physical_postal_code",
-    "artistic_name", "banner_photo_url", "profile_photo_url", "biography",
-    "website_urls", "country_of_residence", "province", "city",
-    "nationality_code", "show_location", "show_country", "show_city",
-    "searchable", "profile_language_preference", "profile_timezone_preference",
-    "profile_visibility", "user_notifications_preference", "marketing_opt_in",
-    "onboarding_step", "onboarding_completed", "user_invitations_preference",
+    "first_legal_name",
+    "middle_legal_name",
+    "last_legal_name",
+    "legal_full_name",
+    "display_name",
+    "title",
+    "gender",
+    "date_of_birth",
+    "artistic_slug",
+
+    "secondary_email",
+    "primary_phone",
+    "secondary_phone",
+    "contact_preference",
+
+    "postal_address_line1",
+    "postal_address_line2",
+    "city_of_residence",
+    "province_of_residence",
+    "country_of_residence",
+
+    "physical_address_line1",
+    "physical_address_line2",
+
+    "artistic_name",
+    "banner_photo_url",
+    "profile_photo_url",
+    "biography",
+    "website_urls",
+
+    "province_of_birth",
+    "city_of_birth",
+    "nationality",
+
+    "show_location",
+    "show_country",
+    "show_city",
+    "searchable",
+
+    "profile_language_preference",
+    "profile_timezone_preference",
+    "profile_visibility",
+    "user_notifications_preference",
+    "marketing_opt_in",
+
+    "onboarding_step",
+    "onboarding_completed",
+    "user_invitations_preference",
+
+    "user_type_id",
 ]
 
 
@@ -6912,6 +6950,11 @@ def update_profile_me():
         return jsonify({"error": "Invalid session"}), 401
 
     body = request.get_json(force=True) or {}
+
+    if "user_type_id" in body and body["user_type_id"] is not None:
+        if not _valid_uuid(body["user_type_id"]):
+            return jsonify({"error": "invalid user_type_id"}), 400
+
     cols, vals = [], []
     for c in USER_PROFILE_WRITABLE:
         if c in body:
@@ -6927,6 +6970,14 @@ def update_profile_me():
     update_sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols)
     try:
         with db_cursor(RealDictCursor) as (conn, cur):
+            if "user_type_id" in body and body["user_type_id"] is not None:
+                cur.execute(
+                    "SELECT id FROM user_types WHERE id = %s AND is_active IS NOT FALSE",
+                    (body["user_type_id"],)
+                )
+                if not cur.fetchone():
+                    return jsonify({"error": "invalid or inactive user_type_id"}), 400
+
             cur.execute(f"""
                 INSERT INTO user_profiles ({", ".join(insert_cols)}, created_at, updated_at)
                 VALUES ({insert_placeholders}, NOW(), NOW())
@@ -7016,6 +7067,94 @@ def get_profile_roles():
         """, (actor_id,))
         rows = cur.fetchall()
     return jsonify({"roles": [_profile_row_to_json(r) for r in rows]})
+
+
+# Roles a user may self-assign or self-remove. Privileged roles
+# (admin, moderator, verifier) are intentionally excluded and can
+# only ever be managed by an administrative process, never by this
+# self-service endpoint.
+SELF_SERVICE_ROLES = [
+    "creator", "delegate", "organization", "member", "investor",
+    "collector", "buyer", "supporter", "publisher", "distributor",
+]
+
+
+@app.put("/api/profile/roles")
+def update_profile_roles():
+    claims, err = _require_auth(request)
+    if err:
+        return err
+    actor_id = _profile_actor_id(claims)
+    if not actor_id:
+        return jsonify({"error": "Invalid session"}), 401
+
+    body = request.get_json(force=True) or {}
+    submitted = body.get("roles")
+
+    if not isinstance(submitted, list):
+        return jsonify({"error": "roles must be a list"}), 400
+
+    submitted = list(dict.fromkeys(submitted))
+
+    for r in submitted:
+        if not isinstance(r, str) or r not in SELF_SERVICE_ROLES:
+            return jsonify({
+                "error": f"'{r}' is not a self-service role"
+            }), 400
+
+    try:
+        with db_cursor(RealDictCursor) as (conn, cur):
+            # Scope entirely to self-service roles. Privileged /
+            # admin-assigned roles are never selected, activated,
+            # or deactivated by this endpoint.
+            cur.execute("""
+                SELECT role, active FROM user_roles
+                WHERE user_id = %s AND role = ANY(%s)
+            """, (actor_id, SELF_SERVICE_ROLES))
+            existing = {row["role"]: row["active"] for row in cur.fetchall()}
+
+            existing_active = {
+                role for role, active in existing.items() if active
+            }
+
+            to_activate = [r for r in submitted if r not in existing_active]
+            to_deactivate = [
+                r for r in existing_active if r not in submitted
+            ]
+
+            for role in to_activate:
+                if role in existing:
+                    cur.execute("""
+                        UPDATE user_roles
+                        SET active = TRUE
+                        WHERE user_id = %s AND role = %s
+                    """, (actor_id, role))
+                else:
+                    cur.execute("""
+                        INSERT INTO user_roles
+                            (user_id, role, active, assigned_at)
+                        VALUES (%s, %s, TRUE, NOW())
+                    """, (actor_id, role))
+
+            for role in to_deactivate:
+                cur.execute("""
+                    UPDATE user_roles
+                    SET active = FALSE
+                    WHERE user_id = %s AND role = %s AND active = TRUE
+                """, (actor_id, role))
+
+            conn.commit()
+
+            cur.execute("""
+                SELECT id, role, assigned_at, active, expires_at
+                FROM user_roles WHERE user_id = %s ORDER BY assigned_at
+            """, (actor_id,))
+            rows = cur.fetchall()
+
+        return jsonify({"roles": [_profile_row_to_json(r) for r in rows]})
+    except Exception as e:
+        log_error("profile", "update_roles_failed", error=str(e))
+        return jsonify({"error": str(e)}), 500
 
 
 @app.get("/api/profile/billing")
