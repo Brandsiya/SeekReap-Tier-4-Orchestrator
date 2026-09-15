@@ -6872,6 +6872,7 @@ USER_PROFILE_WRITABLE = [
     "date_of_birth",
     "artistic_slug",
 
+    "primary_email",
     "secondary_email",
     "primary_phone",
     "secondary_phone",
@@ -7441,7 +7442,8 @@ def _optional_actor_id(req):
 PUBLIC_PROFILE_EXCLUDE = {
     'identity_number_encrypted', 'identity_number_hashed', 'identity_number_last4',
     'passport_number_encrypted', 'passport_number_hashed', 'passport_number_last4',
-    'recovery_email', 'primary_phone', 'secondary_phone', 'contact_preference',
+    'primary_email', 'secondary_email',
+    'primary_phone', 'secondary_phone', 'contact_preference',
     'postal_address_line1', 'postal_address_line2', 'postal_city', 'postal_province',
     'postal_country', 'postal_postal_code',
     'physical_address_line1', 'physical_address_line2', 'physical_city',
